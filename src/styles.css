@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(22, 122, 114, 0.11), transparent 28%),
+    radial-gradient(circle at 88% 18%, rgba(210, 79, 53, 0.09), transparent 24%),
+    #f5f7fb;
+  color: #1f2937;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+.log-view {
+  min-height: 280px;
+  max-height: 420px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #111827;
+  color: #d1fae5;
+  padding: 14px;
+  font: 13px/1.55 Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+}
+
+.chat-view {
+  min-height: 360px;
+  max-height: 520px;
+}
+
+.el-card {
+  border-radius: 8px;
+}
