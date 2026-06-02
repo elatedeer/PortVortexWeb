@@ -1,199 +1,508 @@
 <template>
-  <div class="min-h-screen bg-[#f4f7fb] text-slate-900">
-    <aside class="fixed inset-y-0 left-0 hidden w-64 border-r border-slate-800 bg-[#111827] text-white lg:flex lg:flex-col">
-      <div class="px-6 py-6">
-        <div class="text-lg font-semibold">PortVortex</div>
-        <div class="mt-1 text-xs text-slate-400">{{ t.subtitle }}</div>
+  <div :class="['min-h-screen transition-colors', darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-[#f5f7fb] text-slate-900']">
+    <aside
+      :class="[
+        'fixed inset-y-0 left-0 z-30 hidden border-r transition-all duration-300 lg:flex lg:flex-col',
+        darkMode ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white',
+        collapsed ? 'w-20' : 'w-64'
+      ]"
+    >
+      <div class="flex h-16 items-center gap-3 px-4">
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-sm font-semibold text-white">PV</div>
+        <div v-if="!collapsed" class="min-w-0">
+          <div class="truncate text-sm font-semibold">PortVortex</div>
+          <div class="truncate text-xs text-slate-500">{{ t.subtitle }}</div>
+        </div>
       </div>
-      <nav class="flex-1 space-y-1 px-3">
-        <div class="rounded-md bg-white/10 px-3 py-2 text-sm font-medium">{{ t.navDownload }}</div>
-        <div class="rounded-md px-3 py-2 text-sm text-slate-400">{{ t.navChat }}</div>
-        <div class="rounded-md px-3 py-2 text-sm text-slate-400">{{ t.navExpert }}</div>
+
+      <nav class="flex-1 space-y-1 px-3 py-3">
+        <button
+          v-for="item in sideNav"
+          :key="item.key"
+          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition"
+          :class="[
+            currentPage === item.key
+              ? darkMode ? 'bg-white/10 text-white' : 'bg-slate-900 text-white'
+              : darkMode ? 'text-slate-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+            collapsed ? 'justify-center' : 'justify-start'
+          ]"
+          @click="currentPage = item.key"
+        >
+          <el-icon><component :is="item.icon" /></el-icon>
+          <span v-if="!collapsed">{{ item.label }}</span>
+        </button>
       </nav>
-      <div class="m-4 rounded-lg border border-white/10 bg-white/5 p-4 text-xs text-slate-300">
-        <div class="mb-2 font-medium text-white">{{ t.deviceTopic }}</div>
-        <div class="break-all text-slate-400">/topic/productid{{ flash.deviceToken || "..." }}</div>
+
+      <div class="space-y-2 px-3 pb-4">
+        <button
+          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition"
+          :class="darkMode ? 'text-slate-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'"
+          @click="openHelp"
+        >
+          <el-icon><QuestionFilled /></el-icon>
+          <span v-if="!collapsed">{{ t.helpDocs }}</span>
+        </button>
+        <button
+          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition"
+          :class="darkMode ? 'text-slate-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'"
+          @click="darkMode = !darkMode"
+        >
+          <el-icon><Moon /></el-icon>
+          <span v-if="!collapsed">{{ t.darkMode }}</span>
+        </button>
+        <button
+          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition"
+          :class="darkMode ? 'text-slate-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'"
+          @click="collapsed = !collapsed"
+        >
+          <el-icon><component :is="collapsed ? Expand : Fold" /></el-icon>
+          <span v-if="!collapsed">{{ t.collapse }}</span>
+        </button>
       </div>
     </aside>
 
-    <main class="lg:pl-64">
-      <header class="sticky top-0 z-10 border-b border-slate-200/80 bg-white/85 backdrop-blur">
-        <div class="flex min-h-16 items-center justify-between gap-3 px-4 md:px-8">
+    <main :class="['transition-all duration-300', collapsed ? 'lg:pl-20' : 'lg:pl-64']">
+      <header :class="['sticky top-0 z-20 border-b backdrop-blur-xl', darkMode ? 'border-slate-800 bg-slate-950/80' : 'border-white/70 bg-white/85']">
+        <div class="flex min-h-16 items-center justify-between gap-4 px-4 md:px-8">
           <div>
-            <h1 class="text-xl font-semibold tracking-normal">{{ t.title }}</h1>
-            <p class="text-xs text-slate-500">{{ t.headerHint }}</p>
+            <h1 class="text-xl font-semibold tracking-tight">{{ pageTitle }}</h1>
+            <p class="mt-0.5 text-xs" :class="darkMode ? 'text-slate-400' : 'text-slate-500'">{{ t.headerHint }}</p>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-3">
             <el-segmented v-model="lang" :options="languageOptions" />
-            <el-button type="primary" :loading="flashing" @click="submitFlash">{{ t.start }}</el-button>
+            <button
+              :class="['flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm shadow-sm transition hover:-translate-y-0.5', darkMode ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-700']"
+              @click="toggleTheme"
+            >
+              <el-icon>
+                <component :is="darkMode ? Sunny : Moon" />
+              </el-icon>
+              <span class="hidden sm:block">{{ darkMode ? t.lightMode : t.darkMode }}</span>
+            </button>
+            <el-dropdown trigger="click" @command="onUserCommand">
+              <button :class="['flex items-center gap-3 rounded-2xl border px-3 py-2 shadow-sm transition hover:-translate-y-0.5', darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white']">
+                <span class="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 text-sm font-semibold text-white">PV</span>
+                <span class="hidden text-left sm:block">
+                  <span class="block text-sm font-medium">{{ user.name }}</span>
+                  <span class="block text-xs text-slate-500">{{ user.role }}</span>
+                </span>
+              </button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="profile">{{ t.profile }}</el-dropdown-item>
+                  <el-dropdown-item command="help">{{ t.helpDocs }}</el-dropdown-item>
+                  <el-dropdown-item divided command="logout">{{ t.logout }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
       </header>
 
       <div class="space-y-5 p-4 md:p-8">
-        <section class="grid gap-4 md:grid-cols-4">
-          <div v-for="card in summaryCards" :key="card.label" class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div class="text-xs text-slate-500">{{ card.label }}</div>
-            <div class="mt-2 text-2xl font-semibold">{{ card.value }}</div>
-            <div class="mt-1 text-xs text-slate-400">{{ card.hint }}</div>
-          </div>
-        </section>
+        <template v-if="currentPage === 'download'">
+          <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <article v-for="card in infoCards" :key="card.label" class="float-card">
+              <div class="absolute inset-x-0 top-0 h-1.5" :class="card.bar"></div>
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <div class="text-xs text-slate-500">{{ card.label }}</div>
+                  <div class="mt-2 text-2xl font-semibold tracking-tight">{{ card.value }}</div>
+                  <div class="mt-1 text-xs text-slate-400">{{ card.hint }}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-50 p-3 text-slate-500">
+                  <el-icon size="22"><component :is="card.icon" /></el-icon>
+                </div>
+              </div>
+              <div v-if="card.badge" class="mt-4 inline-flex rounded-full px-3 py-1 text-xs font-medium" :class="card.badgeClass">
+                {{ card.badge }}
+              </div>
+            </article>
+          </section>
 
-        <section class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_410px]">
-          <div class="space-y-5">
-            <el-card shadow="never" class="control-card">
+          <section class="space-y-5">
+            <div class="space-y-5">
+              <el-card class="control-card" shadow="never">
+                <template #header>
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <div class="text-base font-semibold">{{ t.downloadSetup }}</div>
+                      <div class="text-xs text-slate-500">{{ t.downloadSetupHint }}</div>
+                    </div>
+                    <div class="flex items-center gap-3">
+                      <el-tag type="info" effect="light">{{ t.formatAuto }}</el-tag>
+                      <el-button type="primary" :loading="flashing" @click="submitFlash">
+                        {{ t.start }}
+                      </el-button>
+                    </div>
+                  </div>
+                </template>
+                <div class="grid gap-4 lg:grid-cols-2">
+                  <div class="field-block lg:col-span-2">
+                    <div class="field-label">{{ t.downloadMode }}</div>
+                    <el-segmented v-model="flash.flashMode" :options="downloadModes" />
+                  </div>
+                  <div class="field-block">
+                    <div class="field-label">{{ t.deviceToken }}</div>
+                    <el-input v-model="flash.deviceToken" placeholder="6bf3418a09725d07" />
+                  </div>
+                  <div class="field-block lg:col-span-2">
+                    <div class="field-label">{{ t.firmware }}</div>
+                    <input class="file-input" type="file" accept=".bin,.hex,application/octet-stream,text/plain" @change="onFirmwareChange">
+                  </div>
+                </div>
+              </el-card>
+              <div class="grid gap-5 lg:grid-cols-2">
+                <el-card class="control-card" shadow="never">
+                  <template #header><span class="text-base font-semibold">{{ t.target }}</span></template>
+                  <div class="grid gap-3">
+                    <div class="field-block">
+                      <div class="field-label">{{ t.targetModel }}</div>
+                      <el-autocomplete
+                        v-model="flash.target"
+                        :fetch-suggestions="queryTargets"
+                        clearable
+                        placeholder="stm32f4"
+                      />
+                    </div>
+                    <div class="field-block">
+                      <div class="field-label">{{ t.baseAddr }}</div>
+                      <el-input v-model="flash.baseAddr" />
+                    </div>
+                    <div class="field-block">
+                      <div class="field-label">{{ t.swdErase }}</div>
+                      <el-select v-model="flash.erase">
+                        <el-option label="sector" value="sector" />
+                        <el-option label="full" value="full" />
+                      </el-select>
+                    </div>
+                    <div class="field-block">
+                      <div class="field-label">{{ t.attach }}</div>
+                      <el-select v-model="flash.attach" clearable :placeholder="t.default">
+                        <el-option label="normal" value="normal" />
+                        <el-option label="under_reset" value="under_reset" />
+                        <el-option label="normal_then_under_reset" value="normal_then_under_reset" />
+                        <el-option label="auto" value="auto" />
+                      </el-select>
+                    </div>
+                  </div>
+                </el-card>
+
+                <el-card class="control-card" shadow="never">
+                  <template #header><span class="text-base font-semibold">{{ t.runtime }}</span></template>
+                  <div class="space-y-4">
+                    <el-checkbox v-model="flash.noResetAfterProgram">{{ t.noReset }}</el-checkbox>
+                    <el-checkbox v-model="flash.singlePacket">{{ t.singlePacket }}</el-checkbox>
+                    <div class="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4 text-sm text-emerald-800">
+                      {{ t.mqttHidden }}
+                    </div>
+                    <div class="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div>
+                        <div class="text-sm font-medium">{{ t.expertMode }}</div>
+                        <div class="text-xs text-slate-500">{{ t.expertHint }}</div>
+                      </div>
+                      <el-switch v-model="expert" />
+                    </div>
+                  </div>
+                </el-card>
+              </div>
+
+              <transition name="fade-up">
+                <el-card v-if="expert" class="control-card" shadow="never">
+                  <template #header>
+                    <div class="flex items-center justify-between">
+                      <span class="text-base font-semibold">{{ t.expertMode }}</span>
+                      <el-tag type="warning" effect="light">{{ t.forAdvanced }}</el-tag>
+                    </div>
+                  </template>
+                  <el-tabs>
+                    <el-tab-pane :label="t.transfer">
+                      <div class="grid gap-4 md:grid-cols-2">
+                        <div class="field-block"><div class="field-label">{{ t.chunkSize }}</div><el-input-number v-model="flash.chunkSize" :min="1" :max="2048" class="w-full" /></div>
+                        <div class="field-block"><div class="field-label">{{ t.chunkDelay }}</div><el-input-number v-model="flash.chunkDelay" :min="0" :step="0.01" class="w-full" /></div>
+                        <div class="field-block"><div class="field-label">{{ t.ackTimeout }}</div><el-input-number v-model="flash.ackTimeout" :min="0.1" :step="0.1" class="w-full" /></div>
+                        <div class="field-block"><div class="field-label">{{ t.window }}</div><el-input-number v-model="flash.window" :min="1" :max="6" class="w-full" /></div>
+                      </div>
+                    </el-tab-pane>
+                    <el-tab-pane :label="t.uartBootloader">
+                      <div class="grid gap-4 md:grid-cols-3">
+                        <div v-for="field in uartFields" :key="field.key" class="field-block">
+                          <div class="field-label">{{ field.label }}</div>
+                          <el-input v-model="flash[field.key]" />
+                        </div>
+                      </div>
+                    </el-tab-pane>
+                    <el-tab-pane :label="t.customAlgo">
+                      <p class="mb-4 text-sm text-slate-600">{{ t.algoBlobHelp }}</p>
+                      <div class="grid gap-4 md:grid-cols-3">
+                        <div class="field-block">
+                          <div class="field-label">{{ t.algoBlob }}</div>
+                          <input class="file-input" type="file" @change="onAlgoBlobChange">
+                        </div>
+                        <div class="field-block"><div class="field-label">Algo</div><el-input v-model="flash.algo" placeholder="custom_sram_algo" /></div>
+                        <div class="field-block"><div class="field-label">Flash Base</div><el-input v-model="flash.flashBase" /></div>
+                        <div class="field-block"><div class="field-label">Erase Size</div><el-input v-model="flash.eraseSize" /></div>
+                        <div v-for="field in customFields" :key="field.key" class="field-block">
+                          <div class="field-label">{{ field.label }}</div>
+                          <el-input v-model="flash[field.key]" />
+                        </div>
+                      </div>
+                    </el-tab-pane>
+                  </el-tabs>
+                </el-card>
+              </transition>
+
+              <el-card class="control-card" shadow="never">
+                <template #header>
+                  <div class="flex items-center justify-between gap-4">
+                    <span class="text-base font-semibold">{{ t.downloadLog }}</span>
+                    <el-progress class="w-56" :percentage="progress" :stroke-width="8" />
+                  </div>
+                </template>
+                <pre class="log-view">{{ logText }}</pre>
+              </el-card>
+            </div>
+          </section>
+        </template>
+
+        <template v-else-if="currentPage === 'chat'">
+          <section class="grid gap-5 xl:grid-cols-2">
+            <el-card class="control-card" shadow="never">
               <template #header>
                 <div class="flex items-center justify-between">
                   <div>
-                    <div class="font-semibold">{{ t.downloadSetup }}</div>
-                    <div class="text-xs text-slate-500">{{ t.downloadSetupHint }}</div>
+                    <div class="text-base font-semibold">{{ t.liveChat }}</div>
+                    <div class="text-xs text-slate-500">{{ t.chatHint }}</div>
                   </div>
-                  <el-tag type="info">{{ t.formatAuto }}</el-tag>
+                  <el-tag :type="deviceOnline ? 'success' : 'info'" effect="light">{{ onlineBadgeText }}</el-tag>
                 </div>
               </template>
-
-              <div class="grid gap-4 lg:grid-cols-2">
-                <el-form-item :label="t.downloadMode">
-                  <el-segmented v-model="flash.flashMode" :options="downloadModes" />
-                </el-form-item>
-                <el-form-item :label="t.deviceToken">
-                  <el-input v-model="flash.deviceToken" placeholder="6bf3418a09725d07" />
-                </el-form-item>
-                <el-form-item :label="t.firmware" class="lg:col-span-2">
-                  <input class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" type="file" accept=".bin,.hex,application/octet-stream,text/plain" @change="onFirmwareChange">
-                </el-form-item>
+              <div class="field-block mb-4">
+                <div class="field-label">{{ t.deviceToken }}</div>
+                <el-input v-model="chatDeviceToken" :disabled="channels.general.connected || channels.rs485.connected" placeholder="6bf3418a09725d07" />
               </div>
-            </el-card>
-
-            <div class="grid gap-5 lg:grid-cols-2">
-              <el-card shadow="never" class="control-card">
-                <template #header><span class="font-semibold">{{ t.target }}</span></template>
-                <div class="grid gap-3">
-                  <el-form-item :label="t.targetModel"><el-input v-model="flash.target" /></el-form-item>
-                  <el-form-item :label="t.baseAddr"><el-input v-model="flash.baseAddr" /></el-form-item>
-                  <el-form-item :label="t.swdErase">
-                    <el-select v-model="flash.erase">
-                      <el-option label="sector" value="sector" />
-                      <el-option label="full" value="full" />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item :label="t.attach">
-                    <el-select v-model="flash.attach" clearable :placeholder="t.default">
-                      <el-option label="normal" value="normal" />
-                      <el-option label="under_reset" value="under_reset" />
-                      <el-option label="normal_then_under_reset" value="normal_then_under_reset" />
-                      <el-option label="auto" value="auto" />
-                    </el-select>
-                  </el-form-item>
-                </div>
-              </el-card>
-
-              <el-card shadow="never" class="control-card">
-                <template #header><span class="font-semibold">{{ t.runtime }}</span></template>
-                <div class="space-y-4">
-                  <el-checkbox v-model="flash.noResetAfterProgram">{{ t.noReset }}</el-checkbox>
-                  <el-checkbox v-model="flash.singlePacket">{{ t.singlePacket }}</el-checkbox>
-                  <div class="rounded-md border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-800">
-                    {{ t.mqttHidden }}
-                  </div>
-                  <div class="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 p-3">
-                    <div>
-                      <div class="text-sm font-medium">{{ t.expertMode }}</div>
-                      <div class="text-xs text-slate-500">{{ t.expertHint }}</div>
-                    </div>
-                    <el-switch v-model="expert" />
-                  </div>
-                </div>
-              </el-card>
-            </div>
-
-            <el-card v-if="expert" shadow="never" class="control-card">
-              <template #header><span class="font-semibold">{{ t.expertMode }}</span></template>
-              <el-tabs>
-                <el-tab-pane :label="t.transfer">
-                  <div class="grid gap-4 md:grid-cols-2">
-                    <el-form-item :label="t.chunkSize"><el-input-number v-model="flash.chunkSize" :min="1" :max="2048" /></el-form-item>
-                    <el-form-item :label="t.chunkDelay"><el-input-number v-model="flash.chunkDelay" :min="0" :step="0.01" /></el-form-item>
-                    <el-form-item :label="t.ackTimeout"><el-input-number v-model="flash.ackTimeout" :min="0.1" :step="0.1" /></el-form-item>
-                    <el-form-item :label="t.window"><el-input-number v-model="flash.window" :min="1" :max="6" /></el-form-item>
-                  </div>
+              <el-tabs v-model="activeChat">
+                <el-tab-pane :label="t.generalChat" name="general">
+                  <chat-channel :channel="channels.general" :labels="t" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @format-change="persistChatFormat('general')" />
                 </el-tab-pane>
-                <el-tab-pane :label="t.uartBootloader">
-                  <div class="grid gap-4 md:grid-cols-3">
-                    <el-form-item label="Baud"><el-input-number v-model="flash.baud" :min="1" /></el-form-item>
-                    <el-form-item label="Page Size"><el-input v-model="flash.pageSize" /></el-form-item>
-                    <el-form-item label="UART Chunk"><el-input-number v-model="flash.uartFlashChunkSize" :min="1" :max="256" /></el-form-item>
-                    <el-form-item label="Timeout ms"><el-input-number v-model="flash.timeoutMs" :min="0" /></el-form-item>
-                    <el-form-item label="Erase Timeout"><el-input-number v-model="flash.eraseTimeoutMs" :min="0" /></el-form-item>
-                    <el-form-item label="Extended Erase"><el-select v-model="flash.extendedErase" clearable><el-option label="1" value="1" /><el-option label="0" value="0" /></el-select></el-form-item>
-                    <el-form-item label="UART Erase"><el-select v-model="flash.uartErase"><el-option label="page" value="page" /><el-option label="sector" value="sector" /><el-option label="full" value="full" /></el-select></el-form-item>
-                    <el-form-item label="ACK Byte"><el-input v-model="flash.ackByte" placeholder="0x79" /></el-form-item>
-                    <el-form-item label="sync_hex"><el-input v-model="flash.syncHex" placeholder="7f" /></el-form-item>
-                    <el-form-item label="get_id_cmd"><el-input v-model="flash.getIdCmdHex" placeholder="02fd" /></el-form-item>
-                    <el-form-item label="write_cmd"><el-input v-model="flash.writeCmdHex" placeholder="31ce" /></el-form-item>
-                    <el-form-item label="go_cmd"><el-input v-model="flash.goCmdHex" placeholder="21de" /></el-form-item>
-                    <el-form-item label="erase_cmd"><el-input v-model="flash.eraseCmdHex" placeholder="43bc" /></el-form-item>
-                    <el-form-item label="ext_erase_cmd"><el-input v-model="flash.extEraseCmdHex" placeholder="44bb" /></el-form-item>
-                    <el-form-item label="full_erase_frame"><el-input v-model="flash.fullEraseFrameHex" placeholder="ff00" /></el-form-item>
-                    <el-form-item label="ext_full_erase"><el-input v-model="flash.extFullEraseFrameHex" placeholder="ffff00" /></el-form-item>
-                    <el-form-item label="addr_format"><el-select v-model="flash.addrFormat" clearable><el-option label="be32_xor" value="be32_xor" /><el-option label="le32_xor" value="le32_xor" /></el-select></el-form-item>
-                    <el-form-item label="erase_format"><el-select v-model="flash.eraseFormat" clearable><el-option label="stm32" value="stm32" /><el-option label="stm32_ext" value="stm32_ext" /></el-select></el-form-item>
-                  </div>
-                </el-tab-pane>
-                <el-tab-pane :label="t.customAlgo">
-                  <p class="mb-4 text-sm text-slate-600">{{ t.algoBlobHelp }}</p>
-                  <div class="grid gap-4 md:grid-cols-3">
-                    <el-form-item :label="t.algoBlob"><input class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" type="file" @change="onAlgoBlobChange"></el-form-item>
-                    <el-form-item label="Algo"><el-input v-model="flash.algo" placeholder="custom_sram_algo" /></el-form-item>
-                    <el-form-item label="Flash Base"><el-input v-model="flash.flashBase" /></el-form-item>
-                    <el-form-item label="Erase Size"><el-input v-model="flash.eraseSize" /></el-form-item>
-                    <el-form-item v-for="field in customFields" :key="field.key" :label="field.label">
-                      <el-input v-model="flash[field.key]" />
-                    </el-form-item>
-                  </div>
+                <el-tab-pane :label="t.rs485Chat" name="rs485">
+                  <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @format-change="persistChatFormat('rs485')" />
                 </el-tab-pane>
               </el-tabs>
             </el-card>
-
-            <el-card shadow="never" class="control-card">
+            <el-card class="control-card" shadow="never">
               <template #header>
                 <div class="flex items-center justify-between">
-                  <span class="font-semibold">{{ t.downloadLog }}</span>
-                  <el-progress class="w-52" :percentage="progress" :stroke-width="8" />
+                  <span class="text-base font-semibold">{{ t.downloadSetup }}</span>
+                  <el-tag type="info" effect="light">{{ t.toolVersion }}</el-tag>
+                </div>
+              </template>
+              <div class="space-y-3 text-sm text-slate-600">
+                <div>{{ t.chatBridgeHint }}</div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="font-medium">{{ t.bridgeStatus }}</div>
+                  <div class="mt-1 text-xs text-slate-500">{{ t.bridgeHint }}</div>
+                </div>
+              </div>
+            </el-card>
+          </section>
+        </template>
+
+        <template v-else-if="currentPage === 'feedback'">
+          <section class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <el-card class="control-card" shadow="never">
+              <template #header>
+                <span class="text-base font-semibold">{{ t.feedback }}</span>
+              </template>
+              <div class="grid gap-4 md:grid-cols-2">
+                <div class="field-block md:col-span-2">
+                  <div class="field-label">{{ t.feedbackTitle }}</div>
+                  <el-input v-model="feedbackForm.title" />
+                </div>
+                <div class="field-block">
+                  <div class="field-label">{{ t.feedbackType }}</div>
+                  <el-select v-model="feedbackForm.type">
+                    <el-option :label="t.feedbackBug" value="bug" />
+                    <el-option :label="t.feedbackImprove" value="improve" />
+                    <el-option :label="t.feedbackOther" value="other" />
+                  </el-select>
+                </div>
+                <div class="field-block">
+                  <div class="field-label">{{ t.contactWay }}</div>
+                  <el-input v-model="feedbackForm.contact" />
+                </div>
+                <div class="field-block md:col-span-2">
+                  <div class="field-label">{{ t.feedbackContent }}</div>
+                  <el-input v-model="feedbackForm.content" type="textarea" :rows="7" />
+                </div>
+              </div>
+              <div class="mt-5 flex gap-3">
+                <el-button type="primary" @click="submitFeedback">{{ t.submitFeedback }}</el-button>
+                <el-button @click="resetFeedback">{{ t.clearFeedback }}</el-button>
+              </div>
+            </el-card>
+            <el-card class="control-card" shadow="never">
+              <template #header><span class="text-base font-semibold">{{ t.authorContact }}</span></template>
+              <div class="space-y-3 text-sm">
+                <div><span class="text-slate-500">author:</span> elated_deer</div>
+                <div><span class="text-slate-500">email:</span> 1791286695@qq.com</div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-600">{{ t.feedbackHint }}</div>
+              </div>
+            </el-card>
+          </section>
+        </template>
+
+        <template v-else-if="currentPage === 'logs'">
+          <section class="grid gap-5 xl:grid-cols-2">
+            <el-card class="control-card" shadow="never">
+              <template #header>
+                <div class="flex items-center justify-between gap-4">
+                  <span class="text-base font-semibold">{{ t.downloadLog }}</span>
+                  <el-progress class="w-56" :percentage="progress" :stroke-width="8" />
                 </div>
               </template>
               <pre class="log-view">{{ logText }}</pre>
             </el-card>
-          </div>
-
-          <aside class="space-y-5">
-            <el-card shadow="never" class="control-card">
-              <template #header><span class="font-semibold">{{ t.liveChat }}</span></template>
-              <div class="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-                {{ t.subscribe }}: /qos1<br>{{ t.publish }}: /qos0
-              </div>
-              <div class="mb-3 flex gap-2">
-                <el-button type="primary" :disabled="chat.connected" @click="connectChat">{{ t.connect }}</el-button>
-                <el-button :disabled="!chat.connected" @click="closeChat">{{ t.close }}</el-button>
-              </div>
-              <pre class="log-view chat-view">{{ chat.log }}</pre>
-              <div class="mt-3 flex gap-2">
-                <el-input v-model="chat.message" :placeholder="t.message" @keydown.enter="sendChat" />
-                <el-button type="primary" :disabled="!chat.connected" @click="sendChat">{{ t.send }}</el-button>
+            <el-card class="control-card" shadow="never">
+              <template #header><span class="text-base font-semibold">{{ t.liveChat }}</span></template>
+              <div class="space-y-4">
+                <div v-for="item in chatLogItems" :key="item.id" class="text-sm text-slate-700">
+                  <span class="text-slate-500">{{ item.at }}</span>
+                  <span class="mx-2 text-slate-400">|</span>
+                  <span class="font-medium">{{ item.channel }}</span>
+                  <span class="mx-2 text-slate-400">|</span>
+                  <span>{{ item.text }}</span>
+                </div>
+                <div v-if="!chatLogItems.length" class="text-sm text-slate-500">{{ t.waiting }}</div>
               </div>
             </el-card>
-          </aside>
-        </section>
+          </section>
+        </template>
+
+        <template v-else-if="currentPage === 'profile'">
+          <section class="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+            <el-card class="profile-card" shadow="never">
+              <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 p-6 text-white">
+                <div class="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-cyan-400/20 blur-2xl"></div>
+                <div class="flex h-20 w-20 items-center justify-center rounded-3xl bg-white/10 text-2xl font-semibold">PV</div>
+                <div class="mt-5 text-2xl font-semibold">{{ user.name }}</div>
+                <div class="mt-1 text-sm text-slate-300">{{ user.role }}</div>
+                <div class="mt-5 rounded-2xl bg-white/10 p-4 text-sm">
+                  <div>{{ user.team }}</div>
+                  <div class="mt-1 text-slate-300">{{ user.email }}</div>
+                </div>
+              </div>
+            </el-card>
+
+            <div class="space-y-5">
+              <el-card class="control-card" shadow="never">
+                <template #header><span class="text-base font-semibold">{{ t.profile }}</span></template>
+                <div class="grid gap-4 md:grid-cols-2">
+                  <div class="field-block"><div class="field-label">{{ t.name }}</div><el-input v-model="user.name" /></div>
+                  <div class="field-block"><div class="field-label">{{ t.role }}</div><el-input v-model="user.role" /></div>
+                  <div class="field-block"><div class="field-label">{{ t.team }}</div><el-input v-model="user.team" /></div>
+                  <div class="field-block"><div class="field-label">Email</div><el-input v-model="user.email" /></div>
+                </div>
+              </el-card>
+
+              <el-card class="control-card" shadow="never">
+                <template #header><span class="text-base font-semibold">{{ t.accountSecurity }}</span></template>
+                <div class="grid gap-4 md:grid-cols-3">
+                  <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="text-xs text-slate-500">{{ t.loginStatus }}</div>
+                    <div class="mt-2 font-semibold text-emerald-600">{{ user.status }}</div>
+                  </div>
+                  <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="text-xs text-slate-500">{{ t.language }}</div>
+                    <div class="mt-2 font-semibold">{{ lang === 'zh' ? '中文' : 'English' }}</div>
+                  </div>
+                  <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="text-xs text-slate-500">{{ t.darkMode }}</div>
+                    <div class="mt-2 font-semibold">{{ darkMode ? 'On' : 'Off' }}</div>
+                  </div>
+                </div>
+              </el-card>
+            </div>
+          </section>
+        </template>
+
+        <template v-else-if="currentPage === 'logs'">
+          <section class="grid gap-5 xl:grid-cols-2">
+            <el-card class="control-card" shadow="never">
+              <template #header>
+                <div class="flex items-center justify-between gap-4">
+                  <span class="text-base font-semibold">{{ t.downloadLog }}</span>
+                  <el-progress class="w-56" :percentage="progress" :stroke-width="8" />
+                </div>
+              </template>
+              <pre class="log-view">{{ logText }}</pre>
+            </el-card>
+            <el-card class="control-card" shadow="never">
+              <template #header><span class="text-base font-semibold">{{ t.liveChat }}</span></template>
+              <div class="space-y-4">
+                <div v-for="item in chatLogItems" :key="item.id" class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="font-medium">{{ item.channel }}</span>
+                    <span class="text-xs text-slate-500">{{ item.at }}</span>
+                  </div>
+                  <div class="mt-1 text-slate-600">{{ item.text }}</div>
+                </div>
+                <div v-if="!chatLogItems.length" class="text-sm text-slate-500">{{ t.waiting }}</div>
+              </div>
+            </el-card>
+          </section>
+        </template>
       </div>
     </main>
   </div>
 </template>
 
 <script setup>
-import { computed, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
+import ChatChannel from "./components/ChatChannel.vue";
+import { DEFAULT_DEVICE_TOKEN, FORMAT_OPTIONS, QUICK_PHRASES } from "./constants";
+import { formatChatTime } from "./utils/time";
+import {
+  ChatDotRound,
+  Connection,
+  Document,
+  Download,
+  Expand,
+  Fold,
+  Moon,
+  Monitor,
+  Promotion,
+  QuestionFilled,
+  Sunny,
+  SwitchButton,
+  UserFilled
+} from "@element-plus/icons-vue";
 
 const lang = ref("zh");
+const darkMode = ref(false);
+const collapsed = ref(false);
+const currentPage = ref("download");
+const expert = ref(false);
+const flashing = ref(false);
+const progress = ref(0);
+const logs = ref([]);
+const firmwareFile = ref(null);
+const algoBlobFile = ref(null);
+const activeChat = ref("general");
+const targetOptions = ref(["stm32f1", "stm32f4", "gd32f1", "ch32f2"]);
+const meta = reactive({ firmwareVersion: "v1.0.0", onlineEngineerCount: 1, deviceOnline: false });
+let chatMessageSeq = 0;
+const feedbackForm = reactive({ title: "", type: "bug", contact: "", content: "" });
+
+const user = reactive({
+  name: "陈工",
+  role: "Senior Engineer",
+  team: "PortVortex Lab",
+  email: "engineer@portvortex.local",
+  status: "Online"
+});
+
 const languageOptions = [
   { label: "中文", value: "zh" },
   { label: "EN", value: "en" }
@@ -201,18 +510,20 @@ const languageOptions = [
 
 const copy = {
   zh: {
-    title: "设备烧录控制台",
-    subtitle: "固件下载与 MQTT 实时对话",
+    subtitle: "固件下载与实时对话",
+    title: "设备控制台",
     headerHint: "输入设备 Token 后，系统自动补全 MQTT 连接与主题。",
-    navDownload: "固件下载",
-    navChat: "实时对话",
-    navExpert: "专家参数",
-    deviceTopic: "设备主题",
+    profile: "个人资料",
+    helpDocs: "帮助文档",
+    darkMode: "深色模式",
+    lightMode: "浅色模式",
+    collapse: "收起",
+    logout: "退出",
     start: "开始下载",
     downloadSetup: "下载设置",
     downloadSetupHint: "选择下载方式并上传 BIN 或 HEX 文件。",
     formatAuto: "格式：自动",
-    downloadMode: "Download Mode",
+    downloadMode: "下载方式",
     deviceToken: "设备 Token",
     firmware: "固件文件",
     target: "目标配置",
@@ -227,6 +538,7 @@ const copy = {
     mqttHidden: "MQTT broker、账号、密码、QoS 和主题前缀均由设备 Token 自动生成。",
     expertMode: "专家模式",
     expertHint: "传输、串口协议模板和自定义算法参数。",
+    forAdvanced: "Advanced",
     transfer: "传输",
     chunkSize: "分块大小",
     chunkDelay: "分块延迟",
@@ -237,25 +549,71 @@ const copy = {
     algoBlob: "Algo blob",
     algoBlobHelp: "Algo blob 是 custom_sram_algo 使用的目标 SRAM 烧录算法二进制，普通烧录不需要选择。",
     downloadLog: "下载日志",
-    liveChat: "MQTT 实时对话",
-    subscribe: "订阅",
-    publish: "发布",
+    liveChat: "实时对话",
+    chatHint: "普通主题与 RS485 主题分开连接。",
+    generalChat: "串口1",
+    rs485Chat: "RS485",
+    logs: "日志",
+    chat: "实时对话",
+    feedback: "问题反馈",
+    clientId: "MQTT ClientID",
+    clientIdAuto: "留空自动随机生成",
+    showTimestamp: "显示时间戳",
+    sendFormat: "发送格式",
+    receiveFormat: "接收格式",
+    quickInsert: "快捷词条",
+    quickPhrases: QUICK_PHRASES,
+    formatOptions: FORMAT_OPTIONS,
+    toolVersion: "V1.0",
+    toolVersionCard: "在线工具版本",
+    chatBridgeHint: "可在此通过虚拟串口或转发桥接与服务器通信。",
+    bridgeStatus: "桥接模式",
+    bridgeHint: "下载软件可连接到本机转发服务，再将串口数据转给服务器。",
+    feedbackTitle: "标题",
+    feedbackType: "类型",
+    feedbackContent: "问题描述",
+    contactWay: "联系方式",
+    feedbackBug: "问题",
+    feedbackImprove: "建议",
+    feedbackOther: "其他",
+    submitFeedback: "提交反馈",
+    clearFeedback: "清空",
+    authorContact: "作者联系方式",
+    feedbackHint: "留下联系方式，便于后续定位和回复。",
     connect: "连接",
     close: "关闭",
     send: "发送",
+    connected: "已连接",
+    topicManaged: "主题由系统自动管理",
     message: "消息",
     waiting: "等待中...",
     disconnected: "未连接。",
-    selectFirmware: "请选择固件文件。"
+    selectFirmware: "请选择固件文件。",
+    online: "在线",
+    offline: "离线",
+    modelCard: "型号",
+    versionCard: "固件版本",
+    engineerCard: "在线工程师",
+    statusCard: "设备在线状态",
+    deviceOnline: "设备在线",
+    deviceOffline: "设备离线",
+    name: "姓名",
+    role: "角色",
+    team: "团队",
+    accountSecurity: "账户与安全",
+    loginStatus: "登录状态",
+    language: "语言"
   },
   en: {
-    title: "Device Download Console",
-    subtitle: "Firmware download and live MQTT chat",
+    subtitle: "Firmware download and live chat",
+    title: "Device Console",
     headerHint: "Enter the device token; MQTT connection and topics are generated automatically.",
-    navDownload: "Download",
-    navChat: "Live Chat",
-    navExpert: "Expert",
-    deviceTopic: "Device Topic",
+    profile: "Profile",
+    helpDocs: "Help Docs",
+    darkMode: "Dark Mode",
+    lightMode: "Light Mode",
+    collapse: "Collapse",
+    logout: "Logout",
     start: "Start Download",
     downloadSetup: "Download Setup",
     downloadSetupHint: "Choose a download mode and upload BIN or HEX firmware.",
@@ -264,7 +622,7 @@ const copy = {
     deviceToken: "Device Token",
     firmware: "Firmware",
     target: "Target",
-    targetModel: "Target",
+    targetModel: "Target Model",
     baseAddr: "Base Addr",
     swdErase: "SWD Erase",
     attach: "Attach",
@@ -275,6 +633,7 @@ const copy = {
     mqttHidden: "MQTT broker, account, password, QoS, and topic prefix are generated from the device token.",
     expertMode: "Expert Mode",
     expertHint: "Transfer, UART protocol template, and custom algorithm parameters.",
+    forAdvanced: "Advanced",
     transfer: "Transfer",
     chunkSize: "Chunk Size",
     chunkDelay: "Chunk Delay",
@@ -285,20 +644,71 @@ const copy = {
     algoBlob: "Algo blob",
     algoBlobHelp: "Algo blob is a raw SRAM flash algorithm binary used only with custom_sram_algo targets.",
     downloadLog: "Download Log",
-    liveChat: "MQTT Live Chat",
-    subscribe: "Subscribe",
-    publish: "Publish",
+    liveChat: "Live Chat",
+    chatHint: "General and RS485 channels are connected separately.",
+    generalChat: "Serial 1",
+    rs485Chat: "RS485",
+    logs: "Logs",
+    chat: "Live Chat",
+    feedback: "Feedback",
+    clientId: "MQTT ClientID",
+    clientIdAuto: "Blank uses a random ID",
+    showTimestamp: "Show timestamp",
+    sendFormat: "Send format",
+    receiveFormat: "Receive format",
+    quickInsert: "Quick phrases",
+    quickPhrases: QUICK_PHRASES,
+    formatOptions: FORMAT_OPTIONS,
+    toolVersion: "V1.0",
+    toolVersionCard: "Online Tool Version",
+    chatBridgeHint: "You can bridge to the server through a virtual serial port or relay.",
+    bridgeStatus: "Bridge mode",
+    bridgeHint: "The download tool can connect to a local relay, which forwards serial data to the server.",
+    feedbackTitle: "Title",
+    feedbackType: "Type",
+    feedbackContent: "Details",
+    contactWay: "Contact",
+    feedbackBug: "Issue",
+    feedbackImprove: "Suggestion",
+    feedbackOther: "Other",
+    submitFeedback: "Submit",
+    clearFeedback: "Clear",
+    authorContact: "Author Contact",
+    feedbackHint: "Leave a way to reach you so the issue can be traced and replied to.",
     connect: "Connect",
     close: "Close",
     send: "Send",
+    connected: "Connected",
+    topicManaged: "Topics are managed by the system",
     message: "Message",
     waiting: "Waiting...",
     disconnected: "Disconnected.",
-    selectFirmware: "Please select firmware."
+    selectFirmware: "Please select firmware.",
+    online: "Online",
+    offline: "Offline",
+    modelCard: "Model",
+    versionCard: "Firmware Version",
+    engineerCard: "Online Engineers",
+    statusCard: "Device Status",
+    deviceOnline: "Device online",
+    deviceOffline: "Device offline",
+    name: "Name",
+    role: "Role",
+    team: "Team",
+    accountSecurity: "Account & Security",
+    loginStatus: "Login Status",
+    language: "Language"
   }
 };
 
 const t = computed(() => copy[lang.value]);
+const pageTitle = computed(() => {
+  if (currentPage.value === "profile") return t.value.profile;
+  if (currentPage.value === "chat") return t.value.chat;
+  if (currentPage.value === "feedback") return t.value.feedback;
+  if (currentPage.value === "logs") return t.value.logs;
+  return t.value.title;
+});
 const downloadModes = computed(() => [
   { label: "SWD", value: "swd" },
   { label: lang.value === "zh" ? "串口" : "Serial", value: "uart" },
@@ -306,36 +716,26 @@ const downloadModes = computed(() => [
 ]);
 
 const customFields = [
-  ["algoLoadAddr", "Load Addr"],
-  ["algoInitPc", "Init PC"],
-  ["algoErasePc", "Erase PC"],
-  ["algoFullErasePc", "Full Erase PC"],
-  ["algoProgramPc", "Program PC"],
-  ["algoUninitPc", "Uninit PC"],
-  ["algoDoneAddr", "Done Addr"],
-  ["algoDoneMagic", "Done Magic"],
-  ["algoStack", "Stack"],
-  ["algoBufferAddr", "Buffer Addr"],
-  ["algoBufferSize", "Buffer Size"],
-  ["algoTimeoutMs", "Timeout ms"],
-  ["algoInitTimeoutMs", "Init Timeout"],
-  ["algoEraseTimeoutMs", "Erase Timeout"],
-  ["algoProgramTimeoutMs", "Program Timeout"],
-  ["algoInitR0", "Init R0"],
-  ["algoInitR1", "Init R1"],
-  ["algoInitR2", "Init R2"]
+  ["algoLoadAddr", "Load Addr"], ["algoInitPc", "Init PC"], ["algoErasePc", "Erase PC"],
+  ["algoFullErasePc", "Full Erase PC"], ["algoProgramPc", "Program PC"], ["algoUninitPc", "Uninit PC"],
+  ["algoDoneAddr", "Done Addr"], ["algoDoneMagic", "Done Magic"], ["algoStack", "Stack"],
+  ["algoBufferAddr", "Buffer Addr"], ["algoBufferSize", "Buffer Size"], ["algoTimeoutMs", "Timeout ms"],
+  ["algoInitTimeoutMs", "Init Timeout"], ["algoEraseTimeoutMs", "Erase Timeout"], ["algoProgramTimeoutMs", "Program Timeout"],
+  ["algoInitR0", "Init R0"], ["algoInitR1", "Init R1"], ["algoInitR2", "Init R2"]
 ].map(([key, label]) => ({ key, label }));
 
-const expert = ref(false);
-const flashing = ref(false);
-const progress = ref(0);
-const logs = ref([]);
-const firmwareFile = ref(null);
-const algoBlobFile = ref(null);
+const uartFields = [
+  ["baud", "Baud"], ["pageSize", "Page Size"], ["uartFlashChunkSize", "UART Chunk"],
+  ["timeoutMs", "Timeout ms"], ["eraseTimeoutMs", "Erase Timeout"], ["extendedErase", "Extended Erase"],
+  ["uartErase", "UART Erase"], ["ackByte", "ACK Byte"], ["syncHex", "sync_hex"],
+  ["getIdCmdHex", "get_id_cmd"], ["writeCmdHex", "write_cmd"], ["goCmdHex", "go_cmd"],
+  ["eraseCmdHex", "erase_cmd"], ["extEraseCmdHex", "ext_erase_cmd"], ["fullEraseFrameHex", "full_erase_frame"],
+  ["extFullEraseFrameHex", "ext_full_erase"], ["addrFormat", "addr_format"], ["eraseFormat", "erase_format"]
+].map(([key, label]) => ({ key, label }));
 
 const flash = reactive({
   flashMode: "swd",
-  deviceToken: "6bf3418a09725d07",
+  deviceToken: DEFAULT_DEVICE_TOKEN,
   target: "stm32f4",
   baseAddr: "0x08000000",
   erase: "sector",
@@ -348,8 +748,8 @@ const flash = reactive({
   window: 3,
   baud: 115200,
   pageSize: "",
-  uartFlashChunkSize: undefined,
-  timeoutMs: undefined,
+  uartFlashChunkSize: "",
+  timeoutMs: "",
   eraseTimeoutMs: 30000,
   extendedErase: "",
   uartErase: "page",
@@ -371,29 +771,94 @@ const flash = reactive({
 
 for (const field of customFields) flash[field.key] = "";
 
-const chat = reactive({
-  id: "",
-  connected: false,
-  log: "",
-  message: "",
-  events: null
+const chatDeviceToken = ref(DEFAULT_DEVICE_TOKEN);
+
+const channels = reactive({
+  general: createChannelState("/qos1", "/qos0"),
+  rs485: createChannelState("/rs485/qos1", "/rs485/qos0")
 });
 
-const logText = computed(() => logs.value.length ? logs.value.join("\n") : t.value.waiting);
-const summaryCards = computed(() => [
-  { label: t.value.downloadMode, value: flash.flashMode.toUpperCase(), hint: t.value.formatAuto },
-  { label: t.value.deviceToken, value: flash.deviceToken || "-", hint: t.value.deviceTopic },
-  { label: t.value.firmware, value: firmwareFile.value ? firmwareFile.value.name : "-", hint: "BIN / HEX" },
-  { label: t.value.liveChat, value: chat.connected ? t.value.connect : t.value.close, hint: "/qos1 -> /qos0" }
+const sideNav = computed(() => [
+  { key: "download", label: t.value.downloadSetup, icon: Download },
+  { key: "chat", label: t.value.chat, icon: ChatDotRound },
+  { key: "feedback", label: t.value.feedback, icon: Promotion },
+  { key: "logs", label: t.value.logs, icon: Document },
+  { key: "profile", label: t.value.profile, icon: UserFilled }
 ]);
 
-function pushLog(line) {
-  logs.value.push(line);
+const deviceOnline = computed(() => meta.deviceOnline || flashing.value || channels.general.connected || channels.rs485.connected);
+const onlineBadgeText = computed(() => deviceOnline.value ? t.value.deviceOnline : t.value.deviceOffline);
+const infoCards = computed(() => [
+  { label: t.value.modelCard, value: "WifiLinker", hint: t.value.targetModel, icon: Monitor, bar: "bg-gradient-to-r from-sky-500 to-cyan-400" },
+  { label: t.value.versionCard, value: meta.firmwareVersion || "-", hint: t.value.formatAuto, icon: Document, bar: "bg-gradient-to-r from-violet-500 to-fuchsia-400" },
+  { label: t.value.engineerCard, value: String(meta.onlineEngineerCount || 1), hint: user.name, icon: UserFilled, bar: "bg-gradient-to-r from-amber-500 to-orange-400" },
+  {
+    label: t.value.toolVersionCard,
+    value: t.value.toolVersion,
+    hint: t.value.toolVersionCard,
+    icon: Connection,
+    bar: "bg-gradient-to-r from-emerald-500 to-lime-400"
+  }
+]);
+
+const logText = computed(() => logs.value.length ? logs.value.join("\n") : t.value.waiting);
+const chatLogItems = computed(() => Object.entries(channels)
+  .flatMap(([key, channel]) => channel.messages.map((item) => ({
+    id: `${key}-${item.id}`,
+    channel: key === "general" ? t.value.generalChat : t.value.rs485Chat,
+    at: item.at,
+    text: `${item.direction || item.status}: ${item.message}`
+  })))
+  .sort((a, b) => a.id.localeCompare(b.id)));
+
+onMounted(async () => {
+  try {
+    const response = await fetch("/api/meta");
+    const payload = await response.json();
+    targetOptions.value = payload.targets || targetOptions.value;
+    Object.assign(user, payload.user || {});
+    meta.firmwareVersion = payload.firmwareVersion || meta.firmwareVersion;
+    meta.onlineEngineerCount = payload.onlineEngineerCount || meta.onlineEngineerCount;
+    meta.deviceOnline = Boolean(payload.deviceOnline);
+  } catch (_) {
+    // Metadata is optional for the UI.
+  }
+});
+
+function createChannelState(subscribeTopic, publishTopic) {
+  return reactive({
+    id: "",
+    connected: false,
+    log: "",
+    message: "",
+    subscribeTopic,
+    publishTopic,
+    clientId: "",
+    showTimestamp: true,
+    sendFormat: "ascii",
+    receiveFormat: "ascii",
+    quickPhrases: [...QUICK_PHRASES],
+    newPhrase: "",
+    messages: [],
+    events: null
+  });
 }
 
-function pushChat(line) {
-  if (!chat.log) chat.log = "";
-  chat.log += `${line}\n`;
+function syncChatTopics() {
+  const token = String(chatDeviceToken.value || "").trim() || DEFAULT_DEVICE_TOKEN;
+  channels.general.subscribeTopic = `/topic/productid${token}/qos1`;
+  channels.general.publishTopic = `/topic/productid${token}/qos0`;
+  channels.rs485.subscribeTopic = `/topic/productid${token}/rs485/qos1`;
+  channels.rs485.publishTopic = `/topic/productid${token}/rs485/qos0`;
+}
+
+syncChatTopics();
+
+function queryTargets(query, callback) {
+  const items = targetOptions.value
+    .filter((item) => item.toLowerCase().includes(String(query || "").toLowerCase()))
+    .map((value) => ({ value }));
+  callback(items);
 }
 
 function onFirmwareChange(event) {
@@ -402,6 +867,31 @@ function onFirmwareChange(event) {
 
 function onAlgoBlobChange(event) {
   algoBlobFile.value = event.target.files[0] || null;
+}
+
+function toggleTheme() {
+  darkMode.value = !darkMode.value;
+}
+
+function persistChatFormat(key) {
+  const channel = channels[key];
+  channel.messages.push({
+    id: ++chatMessageSeq,
+    at: formatChatTime(new Date()),
+    status: "format",
+    message: `${key}:${channel.sendFormat}/${channel.receiveFormat}`
+  });
+}
+
+function submitFeedback() {
+  ElMessage.success(t.value.submitFeedback);
+}
+
+function resetFeedback() {
+  feedbackForm.title = "";
+  feedbackForm.type = "bug";
+  feedbackForm.contact = "";
+  feedbackForm.content = "";
 }
 
 function appendFormValue(data, key, value) {
@@ -425,14 +915,12 @@ async function submitFlash() {
   data.set("singlePacket", flash.singlePacket ? "1" : "0");
   data.set("noResetAfterProgram", flash.noResetAfterProgram ? "1" : "0");
   data.set("algoBlobPresent", algoBlobFile.value ? "1" : "0");
-
   try {
     pushLog(lang.value === "zh" ? "正在提交下载任务..." : "Submitting download job...");
     const response = await fetch("/api/flash", { method: "POST", body: data });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Failed to create job");
     pushLog(`Job ID: ${payload.id}`);
-
     const events = new EventSource(`/api/jobs/${payload.id}/events`);
     events.onmessage = (message) => {
       const eventData = JSON.parse(message.data);
@@ -458,51 +946,106 @@ async function submitFlash() {
   }
 }
 
-async function connectChat() {
+watch(chatDeviceToken, syncChatTopics);
+
+function pushLog(line) {
+  logs.value.push(line);
+}
+
+function pushChannelLog(channel, line) {
+  channel.log += `${line}\n`;
+}
+
+function pushChannelMessage(channel, item) {
+  const at = item.at ? new Date(item.at) : new Date();
+  channel.messages.push({
+    id: ++chatMessageSeq,
+    at: formatChatTime(at),
+    direction: item.direction || "",
+    status: item.status || "",
+    topic: item.topic || "",
+    message: item.message || ""
+  });
+}
+
+async function connectChannel(key) {
+  const channel = channels[key];
   try {
-    pushChat(lang.value === "zh" ? "正在连接 MQTT 对话..." : "Connecting MQTT chat...");
+    pushChannelLog(channel, lang.value === "zh" ? "正在连接..." : "Connecting...");
+    pushChannelMessage(channel, { status: "connecting", message: lang.value === "zh" ? "正在连接..." : "Connecting..." });
     const response = await fetch("/api/chat/connect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceToken: flash.deviceToken })
+      body: JSON.stringify({
+        deviceToken: chatDeviceToken.value,
+        subscribeTopic: channel.subscribeTopic,
+        publishTopic: channel.publishTopic,
+        clientId: channel.clientId,
+        receiveFormat: channel.receiveFormat,
+        chatQos: 0
+      })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Chat connect failed");
-    chat.id = payload.id;
-    chat.connected = true;
-    pushChat(`Connected. Sub: ${payload.subscribeTopic}`);
-    pushChat(`Publish: ${payload.publishTopic}`);
-    chat.events = new EventSource(`/api/chat/${chat.id}/events`);
-    chat.events.onmessage = (message) => {
+    channel.id = payload.id;
+    channel.subscribeTopic = payload.subscribeTopic || channel.subscribeTopic;
+    channel.publishTopic = payload.publishTopic || channel.publishTopic;
+    channel.clientId = payload.clientId || channel.clientId;
+    channel.connected = true;
+    pushChannelLog(channel, t.value.connected);
+    channel.events = new EventSource(`/api/chat/${channel.id}/events`);
+    channel.events.onmessage = (message) => {
       const eventData = JSON.parse(message.data);
       if (eventData.type === "message") {
-        pushChat(`${eventData.direction === "in" ? "<" : ">"} [${eventData.topic}] ${eventData.message}`);
+        pushChannelLog(channel, `${eventData.direction === "in" ? "<" : ">"} [${eventData.topic}] ${eventData.message}`);
+        pushChannelMessage(channel, eventData);
       }
-      if (eventData.type === "status") pushChat(`* ${eventData.message}`);
+      if (eventData.type === "status") {
+        channel.connected = eventData.status !== "closed" && eventData.status !== "error";
+        pushChannelLog(channel, `* ${eventData.message}`);
+        pushChannelMessage(channel, eventData);
+      }
     };
-    chat.events.onerror = () => pushChat("* chat event stream disconnected");
+    channel.events.onerror = () => pushChannelLog(channel, "* stream disconnected");
   } catch (err) {
-    pushChat(`ERROR: ${err.message}`);
+    pushChannelLog(channel, `ERROR: ${err.message}`);
+    pushChannelMessage(channel, { status: "error", message: err.message });
   }
 }
 
-async function sendChat() {
-  if (!chat.connected || !chat.message) return;
-  const message = chat.message;
-  chat.message = "";
-  const response = await fetch(`/api/chat/${chat.id}/send`, {
+async function sendChannel(key) {
+  const channel = channels[key];
+  if (!channel.connected || !channel.message) return;
+  const message = channel.message;
+  const response = await fetch(`/api/chat/${channel.id}/send`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message })
+    body: JSON.stringify({ message, format: channel.sendFormat })
   });
-  if (!response.ok) pushChat("ERROR: send failed");
+  if (!response.ok) {
+    pushChannelLog(channel, "ERROR: send failed");
+    pushChannelMessage(channel, { status: "error", message: "send failed" });
+  }
 }
 
-async function closeChat() {
-  if (!chat.id) return;
-  await fetch(`/api/chat/${chat.id}/close`, { method: "POST" });
-  if (chat.events) chat.events.close();
-  chat.id = "";
-  chat.connected = false;
+async function closeChannel(key) {
+  const channel = channels[key];
+  if (!channel.id) return;
+  await fetch(`/api/chat/${channel.id}/close`, { method: "POST" });
+  if (channel.events) channel.events.close();
+  channel.id = "";
+  channel.connected = false;
+  pushChannelLog(channel, lang.value === "zh" ? "已关闭。" : "Closed.");
+  pushChannelMessage(channel, { status: "closed", message: lang.value === "zh" ? "已关闭。" : "Closed." });
+}
+
+function openHelp() {
+  ElMessage.info(t.value.helpDocs);
+}
+
+function onUserCommand(command) {
+  if (command === "profile") currentPage.value = "profile";
+  if (command === "help") openHelp();
+  if (command === "logout") ElMessage.success(t.value.logout);
 }
 </script>

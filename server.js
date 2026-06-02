@@ -27,6 +27,8 @@ const DEFAULTS = {
   qos: 1
 };
 
+const TARGET_OPTIONS = ["stm32f1", "stm32f4", "gd32f1", "ch32f2"];
+
 const FIXED_HARDWARE = {
   portKind: "uart",
   uartPort: "1",
@@ -173,6 +175,19 @@ class MqttClient {
     }
   }
 
+  async waitForAnyMessage(topics, timeoutSeconds) {
+    const topicSet = new Set((topics || []).filter(Boolean));
+    const deadline = Date.now() + timeoutSeconds * 1000;
+    while (true) {
+      const index = this.incoming.findIndex((msg) => topicSet.has(msg.topic));
+      if (index >= 0) return this.incoming.splice(index, 1)[0];
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(`Timeout waiting for MQTT topics: ${Array.from(topicSet).join(", ")}`);
+      const [type, body] = await this._readPacket(remaining);
+      this._handleAsyncPacket(type, body);
+    }
+  }
+
   disconnect() {
     if (!this.socket) return;
     try {
@@ -299,6 +314,61 @@ function mqttConfigFromParams(params) {
     username: DEFAULTS.mqttUsername,
     password: DEFAULTS.mqttPassword,
     topicPrefix: `/topic/productid${deviceToken}`
+  };
+}
+
+function topicWithDevicePrefix(topic, topicPrefix) {
+  const suffix = String(topic || "").trim() || "/";
+  if (suffix === topicPrefix || suffix.startsWith(`${topicPrefix}/`)) return suffix;
+  return `${topicPrefix}/${suffix.replace(/^\/+/, "")}`;
+}
+
+function normalizeMqttClientId(value) {
+  const text = String(value || "").trim();
+  if (!text) return `web-chat-${crypto.randomBytes(4).toString("hex")}`;
+  if (!/^[A-Za-z0-9_-]+$/.test(text)) {
+    throw new Error("MQTT ClientID can only contain letters, numbers, underscore, or dash");
+  }
+  return text;
+}
+
+function normalizeMessageFormat(value) {
+  const format = String(value || "ascii").toLowerCase();
+  if (!["ascii", "hex"].includes(format)) throw new Error("message format must be ascii or hex");
+  return format;
+}
+
+function bufferFromMessage(message, format) {
+  if (format === "ascii") return Buffer.from(String(message || ""), "utf8");
+  const text = String(message || "").replace(/\s+/g, "");
+  if (!text) return Buffer.alloc(0);
+  if (!/^[0-9a-fA-F]+$/.test(text) || text.length % 2 !== 0) {
+    throw new Error("hex message must contain complete hexadecimal bytes");
+  }
+  return Buffer.from(text, "hex");
+}
+
+function messageFromBuffer(payload, format) {
+  if (format === "hex") return payload.toString("hex").toUpperCase().replace(/(..)/g, "$1 ").trim();
+  return payload.toString("utf8");
+}
+
+function payloadFingerprint(payload) {
+  return Buffer.from(payload || Buffer.alloc(0)).toString("hex");
+}
+
+function getMetaSnapshot() {
+  return {
+    targets: TARGET_OPTIONS,
+    user: {
+      name: "陈工",
+      role: "Senior Engineer",
+      team: "PortVortex Lab",
+      status: "Online"
+    },
+    firmwareVersion: "v1.0.0",
+    onlineEngineerCount: Math.max(1, chats.size + 1),
+    deviceOnline: jobs.size > 0 || chats.size > 0
   };
 }
 
@@ -690,8 +760,10 @@ async function startChatSession(params) {
   const mqtt = mqttConfigFromParams(params);
   const broker = mqtt.broker;
   const mqttPort = mqtt.port;
-  const subscribeTopic = params.subscribeTopic || "/qos1";
-  const publishTopic = params.publishTopic || "/qos0";
+  const subscribeTopic = topicWithDevicePrefix(params.subscribeTopic || "qos1", mqtt.topicPrefix);
+  const publishTopic = topicWithDevicePrefix(params.publishTopic || "qos0", mqtt.topicPrefix);
+  const clientId = normalizeMqttClientId(params.clientId);
+  const receiveFormat = normalizeMessageFormat(params.receiveFormat);
   const qos = Number(params.chatQos || 0);
   if (![0, 1].includes(qos)) throw new Error("chat publish qos must be 0 or 1");
 
@@ -703,63 +775,116 @@ async function startChatSession(params) {
     mqttPort,
     subscribeTopic,
     publishTopic,
+    listenTopics: Array.from(new Set([subscribeTopic, publishTopic].filter(Boolean))),
+    clientId,
+    receiveFormat,
     qos,
+    mqtt,
     client: null,
     publishClient: null,
+    selfMessages: [],
     clients: new Set(),
     events: []
   };
   chats.set(id, chat);
 
-  const client = new MqttClient(
-    broker,
-    mqttPort,
-    `web-chat-sub-${Date.now()}`,
-    mqtt.username,
-    mqtt.password
-  );
-  const publishClient = new MqttClient(
-    broker,
-    mqttPort,
-    `web-chat-pub-${Date.now()}`,
-    mqtt.username,
-    mqtt.password
-  );
-  chat.client = client;
-  chat.publishClient = publishClient;
-
-  await client.connect();
-  await publishClient.connect();
-  await client.subscribe(subscribeTopic, 1);
+  await connectChatClients(chat);
   chat.status = "connected";
   pushChat(chat, { type: "status", status: "connected", message: `Subscribed ${subscribeTopic}, publishing ${publishTopic}` });
-  listenForChat(chat).catch((err) => {
-    chat.status = "error";
-    pushChat(chat, { type: "status", status: "error", message: err.message });
-  });
+  listenForChat(chat);
   return chat;
 }
 
-async function listenForChat(chat) {
-  while (chat.status === "connected") {
-    const payload = await chat.client.waitForMessage(chat.subscribeTopic, 60 * 60);
-    pushChat(chat, { type: "message", direction: "in", topic: chat.subscribeTopic, message: payload.toString("utf8") });
+async function connectChatClients(chat) {
+  const nonce = crypto.randomBytes(2).toString("hex");
+  const client = new MqttClient(
+    chat.broker,
+    chat.mqttPort,
+    `${chat.clientId}-sub-${nonce}`,
+    chat.mqtt.username,
+    chat.mqtt.password
+  );
+  const publishClient = new MqttClient(
+    chat.broker,
+    chat.mqttPort,
+    `${chat.clientId}-pub-${nonce}`,
+    chat.mqtt.username,
+    chat.mqtt.password
+  );
+  chat.client = client;
+  chat.publishClient = publishClient;
+  await client.connect();
+  await publishClient.connect();
+  for (const topic of chat.listenTopics) {
+    await client.subscribe(topic, 1);
   }
 }
 
-async function sendChatMessage(chat, message) {
+function disconnectChatClients(chat) {
+  if (chat.client) chat.client.disconnect();
+  if (chat.publishClient) chat.publishClient.disconnect();
+  chat.client = null;
+  chat.publishClient = null;
+}
+
+async function listenForChat(chat) {
+  while (chat.status !== "closed") {
+    try {
+      chat.status = "connected";
+      const packet = await chat.client.waitForAnyMessage(chat.listenTopics, 60 * 60);
+      const fingerprint = payloadFingerprint(packet.payload);
+      const selfIndex = chat.selfMessages.findIndex((item) => item.fingerprint === fingerprint);
+      if (selfIndex >= 0) {
+        chat.selfMessages.splice(selfIndex, 1);
+        continue;
+      }
+      pushChat(chat, { type: "message", direction: "in", topic: packet.topic, message: messageFromBuffer(packet.payload, chat.receiveFormat) });
+    } catch (err) {
+      if (chat.status === "closed") return;
+      if (err.message.startsWith("Timeout waiting for MQTT topic")) continue;
+      chat.status = "reconnecting";
+      pushChat(chat, { type: "status", status: "reconnecting", message: `MQTT reconnecting: ${err.message}` });
+      disconnectChatClients(chat);
+      while (chat.status !== "closed") {
+        try {
+          await wait(1500);
+          await connectChatClients(chat);
+          chat.status = "connected";
+          pushChat(chat, { type: "status", status: "connected", message: `Reconnected ${chat.subscribeTopic}` });
+          break;
+        } catch (reconnectErr) {
+          pushChat(chat, { type: "status", status: "reconnecting", message: `Reconnect failed: ${reconnectErr.message}` });
+          disconnectChatClients(chat);
+        }
+      }
+    }
+  }
+}
+
+async function sendChatMessage(chat, message, format = "ascii") {
   if (!chat.publishClient || chat.status !== "connected") throw new Error("chat session is not connected");
-  await chat.publishClient.publish(chat.publishTopic, Buffer.from(message, "utf8"), chat.qos);
-  pushChat(chat, { type: "message", direction: "out", topic: chat.publishTopic, message });
+  const sendFormat = normalizeMessageFormat(format);
+  const payload = bufferFromMessage(message, sendFormat);
+  chat.selfMessages.push({ fingerprint: payloadFingerprint(payload), at: Date.now() });
+  await chat.publishClient.publish(chat.publishTopic, payload, chat.qos);
+  pushChat(chat, {
+    type: "message",
+    direction: "out",
+    topic: chat.publishTopic,
+    message: messageFromBuffer(payload, sendFormat)
+  });
 }
 
 function closeChat(chat) {
   chat.status = "closed";
-  if (chat.client) chat.client.disconnect();
-  if (chat.publishClient) chat.publishClient.disconnect();
+  disconnectChatClients(chat);
   pushChat(chat, { type: "status", status: "closed", message: "Chat session closed" });
   for (const client of chat.clients) client.end();
   chats.delete(chat.id);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function parseMultipart(req) {
@@ -833,6 +958,9 @@ async function readJson(req) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://localhost");
+    if (req.method === "GET" && url.pathname === "/api/meta") {
+      return send(res, 200, JSON.stringify(getMetaSnapshot()), "application/json");
+    }
     if (req.method === "POST" && url.pathname === "/api/flash") {
       const { fields, files } = await parseMultipart(req);
       const firmware = files.firmwareFile || files.binFile;
@@ -848,6 +976,7 @@ const server = http.createServer(async (req, res) => {
       const chat = await startChatSession(body);
       return send(res, 200, JSON.stringify({
         id: chat.id,
+        clientId: chat.clientId,
         subscribeTopic: chat.subscribeTopic,
         publishTopic: chat.publishTopic
       }), "application/json");
@@ -857,7 +986,7 @@ const server = http.createServer(async (req, res) => {
       const chat = chats.get(id);
       if (!chat) return send(res, 404, JSON.stringify({ error: "chat session not found" }), "application/json");
       const body = await readJson(req);
-      await sendChatMessage(chat, String(body.message || ""));
+      await sendChatMessage(chat, String(body.message || ""), body.format || "ascii");
       return send(res, 200, JSON.stringify({ ok: true }), "application/json");
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/chat/") && url.pathname.endsWith("/close")) {
