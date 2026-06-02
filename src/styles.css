@@ -153,6 +153,10 @@ select {
   justify-content: flex-end;
 }
 
+.chat-row.peer {
+  justify-content: flex-end;
+}
+
 .chat-row.status {
   justify-content: center;
 }
@@ -174,14 +178,18 @@ select {
   text-align: right;
 }
 
+.chat-row.peer .chat-line {
+  color: #7c2d12;
+  text-align: right;
+}
+
 .chat-row.status .chat-line {
   max-width: 92%;
   color: #64748b;
   text-align: center;
 }
 
-.chat-time,
-.chat-topic {
+.chat-time {
   margin-right: 6px;
   font-size: 11px;
   line-height: 1.35;
@@ -347,6 +355,10 @@ select {
 
 .dark .chat-row.out .chat-line {
   color: #bbf7d0;
+}
+
+.dark .chat-row.peer .chat-line {
+  color: #fed7aa;
 }
 
 .dark .chat-row.status .chat-line {

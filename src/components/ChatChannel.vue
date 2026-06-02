@@ -67,11 +67,10 @@
         <div
           v-for="item in channel.messages"
           :key="item.id"
-          :class="['chat-row', item.direction === 'out' ? 'out' : item.direction === 'in' ? 'in' : 'status']"
+          :class="['chat-row', item.direction === 'out' ? 'out' : item.direction === 'peer' ? 'peer' : item.direction === 'in' ? 'in' : 'status']"
         >
           <div class="chat-line">
             <span v-if="channel.showTimestamp" class="chat-time">{{ item.at }}</span>
-            <span v-if="item.topic && item.direction !== 'status'" class="chat-topic">[{{ item.topic }}]</span>
             <span class="chat-text">{{ item.message || item.status || "" }}</span>
           </div>
         </div>

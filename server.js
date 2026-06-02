@@ -838,7 +838,12 @@ async function listenForChat(chat) {
         chat.selfMessages.splice(selfIndex, 1);
         continue;
       }
-      pushChat(chat, { type: "message", direction: "in", topic: packet.topic, message: messageFromBuffer(packet.payload, chat.receiveFormat) });
+      pushChat(chat, {
+        type: "message",
+        direction: packet.topic === chat.publishTopic ? "peer" : "in",
+        topic: packet.topic,
+        message: messageFromBuffer(packet.payload, chat.receiveFormat)
+      });
     } catch (err) {
       if (chat.status === "closed") return;
       if (err.message.startsWith("Timeout waiting for MQTT topic")) continue;
