@@ -163,6 +163,7 @@
                         :fetch-suggestions="queryTargets"
                         clearable
                         placeholder="stm32f4"
+                        @select="applyTargetConfig($event.value)"
                       />
                     </div>
                     <div class="field-block">
@@ -206,6 +207,26 @@
                   </div>
                 </el-card>
               </div>
+
+              <el-card class="control-card" shadow="never">
+                <template #header>
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <div class="text-base font-semibold">Chip Config Import</div>
+                      <div class="text-xs text-slate-500">Paste the LLM JSON output to add a target and auto-fill download parameters.</div>
+                    </div>
+                    <el-button :loading="importingChipConfig" type="primary" @click="importChipConfig">
+                      Import
+                    </el-button>
+                  </div>
+                </template>
+                <el-input
+                  v-model="chipConfigInput"
+                  type="textarea"
+                  :rows="7"
+                  placeholder='{"id":"stm32g0","defaults":{"baseAddr":"0x08000000"},"swd":{"profile":"model=stm32g0;flash_base=0x08000000;erase=sector"}}'
+                />
+              </el-card>
 
               <transition name="fade-up">
                 <el-card v-if="expert" class="control-card" shadow="never">
@@ -266,7 +287,7 @@
         </template>
 
         <template v-else-if="currentPage === 'chat'">
-          <section class="grid gap-5 xl:grid-cols-2">
+          <section class="space-y-5">
             <el-card class="control-card" shadow="never">
               <template #header>
                 <div class="flex items-center justify-between">
@@ -281,30 +302,17 @@
                 <div class="field-label">{{ t.deviceToken }}</div>
                 <el-input v-model="chatDeviceToken" :disabled="channels.general.connected || channels.rs485.connected" placeholder="6bf3418a09725d07" />
               </div>
-              <el-tabs v-model="activeChat">
-                <el-tab-pane :label="t.generalChat" name="general">
-                  <chat-channel :channel="channels.general" :labels="t" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @format-change="persistChatFormat('general')" />
-                </el-tab-pane>
-                <el-tab-pane :label="t.rs485Chat" name="rs485">
-                  <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @format-change="persistChatFormat('rs485')" />
-                </el-tab-pane>
-              </el-tabs>
             </el-card>
-            <el-card class="control-card" shadow="never">
-              <template #header>
-                <div class="flex items-center justify-between">
-                  <span class="text-base font-semibold">{{ t.downloadSetup }}</span>
-                  <el-tag type="info" effect="light">{{ t.toolVersion }}</el-tag>
-                </div>
-              </template>
-              <div class="space-y-3 text-sm text-slate-600">
-                <div>{{ t.chatBridgeHint }}</div>
-                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div class="font-medium">{{ t.bridgeStatus }}</div>
-                  <div class="mt-1 text-xs text-slate-500">{{ t.bridgeHint }}</div>
-                </div>
-              </div>
-            </el-card>
+            <section class="grid gap-5 xl:grid-cols-2">
+              <el-card class="control-card" shadow="never">
+                <template #header><span class="text-base font-semibold">{{ t.generalChat }}</span></template>
+                <chat-channel :channel="channels.general" :labels="t" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @format-change="persistChatFormat('general')" @timer-change="syncTimedSend('general')" />
+              </el-card>
+              <el-card class="control-card" shadow="never">
+                <template #header><span class="text-base font-semibold">{{ t.rs485Chat }}</span></template>
+                <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @format-change="persistChatFormat('rs485')" @timer-change="syncTimedSend('rs485')" />
+              </el-card>
+            </section>
           </section>
         </template>
 
@@ -458,10 +466,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import ChatChannel from "./components/ChatChannel.vue";
 import { DEFAULT_DEVICE_TOKEN, FORMAT_OPTIONS, QUICK_PHRASES } from "./constants";
+import { normalizeHexMessage } from "./utils/messageFormat";
 import { formatChatTime } from "./utils/time";
 import {
   ChatDotRound,
@@ -489,8 +498,10 @@ const progress = ref(0);
 const logs = ref([]);
 const firmwareFile = ref(null);
 const algoBlobFile = ref(null);
-const activeChat = ref("general");
 const targetOptions = ref(["stm32f1", "stm32f4", "gd32f1", "ch32f2"]);
+const chipConfigs = ref([]);
+const chipConfigInput = ref("");
+const importingChipConfig = ref(false);
 const meta = reactive({ firmwareVersion: "v1.0.0", onlineEngineerCount: 1, deviceOnline: false });
 let chatMessageSeq = 0;
 const feedbackForm = reactive({ title: "", type: "bug", contact: "", content: "" });
@@ -561,6 +572,12 @@ const copy = {
     showTimestamp: "显示时间戳",
     sendFormat: "发送格式",
     receiveFormat: "接收格式",
+    autoScroll: "自动滚屏",
+    timedSend: "定时发送",
+    milliseconds: "毫秒",
+    seconds: "秒",
+    appendSuffix: "自动发送附加位",
+    appendValue: "附加位",
     quickInsert: "快捷词条",
     quickPhrases: QUICK_PHRASES,
     formatOptions: FORMAT_OPTIONS,
@@ -656,6 +673,12 @@ const copy = {
     showTimestamp: "Show timestamp",
     sendFormat: "Send format",
     receiveFormat: "Receive format",
+    autoScroll: "Auto scroll",
+    timedSend: "Timed send",
+    milliseconds: "ms",
+    seconds: "s",
+    appendSuffix: "Append suffix",
+    appendValue: "Suffix",
     quickInsert: "Quick phrases",
     quickPhrases: QUICK_PHRASES,
     formatOptions: FORMAT_OPTIONS,
@@ -815,14 +838,17 @@ onMounted(async () => {
   try {
     const response = await fetch("/api/meta");
     const payload = await response.json();
-    targetOptions.value = payload.targets || targetOptions.value;
-    Object.assign(user, payload.user || {});
-    meta.firmwareVersion = payload.firmwareVersion || meta.firmwareVersion;
-    meta.onlineEngineerCount = payload.onlineEngineerCount || meta.onlineEngineerCount;
-    meta.deviceOnline = Boolean(payload.deviceOnline);
+    syncMetaPayload(payload);
+    applyTargetConfig(flash.target);
   } catch (_) {
     // Metadata is optional for the UI.
   }
+});
+
+onBeforeUnmount(() => {
+  Object.values(channels).forEach((channel) => {
+    if (channel.timedTimer) clearInterval(channel.timedTimer);
+  });
 });
 
 function createChannelState(subscribeTopic, publishTopic) {
@@ -835,8 +861,15 @@ function createChannelState(subscribeTopic, publishTopic) {
     publishTopic,
     clientId: "",
     showTimestamp: true,
+    autoScroll: true,
     sendFormat: "ascii",
     receiveFormat: "ascii",
+    timedEnabled: false,
+    timedValue: 1000,
+    timedUnit: "ms",
+    timedTimer: null,
+    appendEnabled: false,
+    appendValue: "",
     quickPhrases: [...QUICK_PHRASES],
     newPhrase: "",
     messages: [],
@@ -854,11 +887,87 @@ function syncChatTopics() {
 
 syncChatTopics();
 
+function syncMetaPayload(payload) {
+  targetOptions.value = payload.targets || targetOptions.value;
+  chipConfigs.value = payload.chipConfigs || chipConfigs.value;
+  Object.assign(user, payload.user || {});
+  meta.firmwareVersion = payload.firmwareVersion || meta.firmwareVersion;
+  meta.onlineEngineerCount = payload.onlineEngineerCount || meta.onlineEngineerCount;
+  meta.deviceOnline = Boolean(payload.deviceOnline);
+}
+
 function queryTargets(query, callback) {
   const items = targetOptions.value
     .filter((item) => item.toLowerCase().includes(String(query || "").toLowerCase()))
     .map((value) => ({ value }));
   callback(items);
+}
+
+function normalizeTarget(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function findTargetConfig(target) {
+  const normalized = normalizeTarget(target);
+  if (!normalized) return null;
+  return chipConfigs.value.find((config) => {
+    const aliases = Array.isArray(config.aliases) ? config.aliases : [];
+    return normalizeTarget(config.id) === normalized || aliases.some((alias) => normalizeTarget(alias) === normalized);
+  }) || null;
+}
+
+function applyFlashValues(values = {}) {
+  for (const [key, value] of Object.entries(values)) {
+    if (key in flash && value !== undefined && value !== null) flash[key] = value;
+  }
+}
+
+function applyTargetConfig(target) {
+  const config = findTargetConfig(target);
+  if (!config) return;
+  const mode = flash.flashMode === "rs485" ? "rs485" : flash.flashMode === "uart" ? "uart" : "swd";
+  applyFlashValues(config.defaults);
+  applyFlashValues(config[mode]);
+  flash.target = config.id;
+}
+
+function extractChipConfigJson(text) {
+  const content = String(text || "").trim();
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(content);
+  if (fenced) return fenced[1].trim();
+  const start = content.indexOf("{");
+  const end = content.lastIndexOf("}");
+  if (start >= 0 && end > start) return content.slice(start, end + 1);
+  return content;
+}
+
+async function importChipConfig() {
+  let config;
+  try {
+    config = JSON.parse(extractChipConfigJson(chipConfigInput.value));
+  } catch (err) {
+    ElMessage.error(`Invalid JSON: ${err.message}`);
+    return;
+  }
+  importingChipConfig.value = true;
+  try {
+    const response = await fetch("/api/chip-configs/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config)
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "chip config import failed");
+    syncMetaPayload(payload.meta || {});
+    flash.target = payload.config.id;
+    applyTargetConfig(payload.config.id);
+    chipConfigInput.value = "";
+    ElMessage.success(`Imported ${payload.config.id}`);
+  } catch (err) {
+    ElMessage.error(err.message);
+  } finally {
+    importingChipConfig.value = false;
+  }
 }
 
 function onFirmwareChange(event) {
@@ -873,8 +982,22 @@ function toggleTheme() {
   darkMode.value = !darkMode.value;
 }
 
-function persistChatFormat(key) {
+async function persistChatFormat(key) {
   const channel = channels[key];
+  if (channel.connected && channel.id) {
+    try {
+      const response = await fetch(`/api/chat/${channel.id}/format`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ receiveFormat: channel.receiveFormat })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "format update failed");
+    } catch (err) {
+      pushChannelMessage(channel, { status: "error", message: err.message });
+      return;
+    }
+  }
   channel.messages.push({
     id: ++chatMessageSeq,
     at: formatChatTime(new Date()),
@@ -947,6 +1070,8 @@ async function submitFlash() {
 }
 
 watch(chatDeviceToken, syncChatTopics);
+watch(() => flash.target, (target) => applyTargetConfig(target));
+watch(() => flash.flashMode, () => applyTargetConfig(flash.target));
 
 function pushLog(line) {
   logs.value.push(line);
@@ -1016,7 +1141,12 @@ async function connectChannel(key) {
 async function sendChannel(key) {
   const channel = channels[key];
   if (!channel.connected || !channel.message) return;
-  const message = channel.message;
+  let message = channel.message;
+  if (channel.appendEnabled && channel.appendValue) message += channel.appendValue;
+  if (channel.sendFormat === "hex") {
+    message = normalizeHexMessage(message);
+    channel.message = normalizeHexMessage(channel.message);
+  }
   const response = await fetch(`/api/chat/${channel.id}/send`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1028,9 +1158,28 @@ async function sendChannel(key) {
   }
 }
 
+function timedIntervalMs(channel) {
+  const value = Math.max(1, Number(channel.timedValue) || 1);
+  return channel.timedUnit === "s" ? value * 1000 : value;
+}
+
+function syncTimedSend(key) {
+  const channel = channels[key];
+  if (channel.timedTimer) {
+    clearInterval(channel.timedTimer);
+    channel.timedTimer = null;
+  }
+  if (!channel.timedEnabled) return;
+  channel.timedTimer = setInterval(() => {
+    if (channel.connected && channel.message) sendChannel(key);
+  }, timedIntervalMs(channel));
+}
+
 async function closeChannel(key) {
   const channel = channels[key];
   if (!channel.id) return;
+  channel.timedEnabled = false;
+  syncTimedSend(key);
   await fetch(`/api/chat/${channel.id}/close`, { method: "POST" });
   if (channel.events) channel.events.close();
   channel.id = "";

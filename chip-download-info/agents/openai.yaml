@@ -1,0 +1,4 @@
+interface:
+  display_name: "Chip Download Info"
+  short_description: "Collect chip flash download support data from a model name."
+  default_prompt: "Given a chip model, collect the official data needed to support firmware download/flashing and output a sourced integration checklist."

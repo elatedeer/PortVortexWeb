@@ -10,6 +10,7 @@ const PORT = Number(process.env.PORT || 3000);
 const DIST_DIR = path.join(__dirname, "dist");
 const PUBLIC_DIR = fs.existsSync(DIST_DIR) ? DIST_DIR : path.join(__dirname, "public");
 const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
+const CHIP_CONFIG_DIR = path.join(__dirname, "chip-configs");
 
 const DEFAULTS = {
   broker: "gsaimqtt.jnxiangchen.com",
@@ -26,8 +27,6 @@ const DEFAULTS = {
   erase: "sector",
   qos: 1
 };
-
-const TARGET_OPTIONS = ["stm32f1", "stm32f4", "gd32f1", "ch32f2"];
 
 const FIXED_HARDWARE = {
   portKind: "uart",
@@ -46,6 +45,120 @@ const FIXED_HARDWARE = {
 
 const jobs = new Map();
 const chats = new Map();
+
+function readJsonFile(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function normalizeTargetName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function safeChipConfigId(value) {
+  const id = normalizeTargetName(value);
+  if (!/^[a-z0-9][a-z0-9_-]{1,63}$/.test(id)) {
+    throw new Error("chip config id must be 2-64 chars: lowercase letters, numbers, underscore, or dash");
+  }
+  return id;
+}
+
+function loadChipConfigs() {
+  if (!fs.existsSync(CHIP_CONFIG_DIR)) return [];
+  return fs.readdirSync(CHIP_CONFIG_DIR)
+    .filter((name) => name.toLowerCase().endsWith(".json"))
+    .map((name) => {
+      const config = readJsonFile(path.join(CHIP_CONFIG_DIR, name));
+      const id = normalizeTargetName(config.id || path.basename(name, ".json"));
+      return {
+        ...config,
+        id,
+        label: config.label || id,
+        aliases: Array.isArray(config.aliases) ? config.aliases.map(normalizeTargetName) : []
+      };
+    })
+    .filter((config) => config.id)
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function getChipConfigs() {
+  try {
+    return loadChipConfigs();
+  } catch (err) {
+    console.error(`Failed to load chip configs: ${err.message}`);
+    return [];
+  }
+}
+
+function getTargetOptions() {
+  const configs = getChipConfigs();
+  return configs.length ? configs.map((config) => config.id) : ["stm32f1", "stm32f4", "gd32f1", "ch32f2"];
+}
+
+function findChipConfig(target) {
+  const normalized = normalizeTargetName(target);
+  return getChipConfigs().find((config) => config.id === normalized || config.aliases.includes(normalized)) || null;
+}
+
+function buildClientChipConfig(config) {
+  const out = {
+    id: config.id,
+    label: config.label,
+    aliases: config.aliases,
+    description: config.description || "",
+    defaults: config.defaults || {},
+    swd: config.swd || {},
+    uart: config.uart || {},
+    rs485: config.rs485 || {}
+  };
+  return out;
+}
+
+function normalizeObject(value, name) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
+  return value;
+}
+
+function normalizeChipConfig(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("chip config must be a JSON object");
+  const id = safeChipConfigId(input.id || input.target || input.model);
+  const aliases = Array.isArray(input.aliases)
+    ? [...new Set(input.aliases.map(normalizeTargetName).filter(Boolean))]
+    : [];
+  const config = {
+    id,
+    label: String(input.label || input.name || id),
+    aliases,
+    description: String(input.description || ""),
+    defaults: normalizeObject(input.defaults, "defaults"),
+    swd: normalizeObject(input.swd, "swd"),
+    uart: normalizeObject(input.uart, "uart"),
+    rs485: normalizeObject(input.rs485, "rs485")
+  };
+  if (input.sources !== undefined) config.sources = Array.isArray(input.sources) ? input.sources : [];
+  if (input.notes !== undefined) config.notes = String(input.notes || "");
+  return config;
+}
+
+function saveChipConfig(input) {
+  const config = normalizeChipConfig(input);
+  fs.mkdirSync(CHIP_CONFIG_DIR, { recursive: true });
+  const filePath = path.join(CHIP_CONFIG_DIR, `${config.id}.json`);
+  fs.writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  return config;
+}
+
+function mergeChipParams(params) {
+  const config = findChipConfig(params.target);
+  if (!config) return params;
+  const mode = params.flashMode === "rs485" ? "rs485" : params.flashMode === "uart" ? "uart" : "swd";
+  return {
+    ...(config.defaults || {}),
+    ...(config[mode] || {}),
+    ...params,
+    target: config.id
+  };
+}
 
 function encodeRemainingLength(length) {
   const out = [];
@@ -358,8 +471,10 @@ function payloadFingerprint(payload) {
 }
 
 function getMetaSnapshot() {
+  const chipConfigs = getChipConfigs().map(buildClientChipConfig);
   return {
-    targets: TARGET_OPTIONS,
+    targets: chipConfigs.length ? chipConfigs.map((config) => config.id) : getTargetOptions(),
+    chipConfigs,
     user: {
       name: "陈工",
       role: "Senior Engineer",
@@ -966,6 +1081,15 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/meta") {
       return send(res, 200, JSON.stringify(getMetaSnapshot()), "application/json");
     }
+    if (req.method === "POST" && url.pathname === "/api/chip-configs/import") {
+      const body = await readJson(req);
+      const config = saveChipConfig(body);
+      return send(res, 200, JSON.stringify({
+        ok: true,
+        config: buildClientChipConfig(config),
+        meta: getMetaSnapshot()
+      }), "application/json");
+    }
     if (req.method === "POST" && url.pathname === "/api/flash") {
       const { fields, files } = await parseMultipart(req);
       const firmware = files.firmwareFile || files.binFile;
@@ -973,7 +1097,7 @@ const server = http.createServer(async (req, res) => {
       const id = crypto.randomUUID();
       const job = { id, status: "running", logs: [], clients: new Set(), progress: { done: 0, total: firmware.data.length, percent: 0 } };
       jobs.set(id, job);
-      runFlashJob(job, fields, firmware, files.algoBlob).catch((err) => completeJob(job, "error", err.message));
+      runFlashJob(job, mergeChipParams(fields), firmware, files.algoBlob).catch((err) => completeJob(job, "error", err.message));
       return send(res, 200, JSON.stringify({ id }), "application/json");
     }
     if (req.method === "POST" && url.pathname === "/api/chat/connect") {
@@ -993,6 +1117,14 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       await sendChatMessage(chat, String(body.message || ""), body.format || "ascii");
       return send(res, 200, JSON.stringify({ ok: true }), "application/json");
+    }
+    if (req.method === "POST" && url.pathname.startsWith("/api/chat/") && url.pathname.endsWith("/format")) {
+      const id = url.pathname.split("/")[3];
+      const chat = chats.get(id);
+      if (!chat) return send(res, 404, JSON.stringify({ error: "chat session not found" }), "application/json");
+      const body = await readJson(req);
+      chat.receiveFormat = normalizeMessageFormat(body.receiveFormat || chat.receiveFormat);
+      return send(res, 200, JSON.stringify({ ok: true, receiveFormat: chat.receiveFormat }), "application/json");
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/chat/") && url.pathname.endsWith("/close")) {
       const id = url.pathname.split("/")[3];

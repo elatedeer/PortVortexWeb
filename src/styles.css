@@ -94,6 +94,37 @@ select {
   letter-spacing: 0;
 }
 
+.format-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 220px);
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #eef2f7;
+  padding: 3px;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.format-option {
+  min-height: 32px;
+  border-radius: 6px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.format-option:hover {
+  color: #0f172a;
+}
+
+.format-option.active {
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  color: #0891b2;
+  box-shadow: 0 6px 16px rgba(8, 145, 178, 0.18), 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
 .file-input {
   width: 100%;
   min-height: 40px;
@@ -138,6 +169,22 @@ select {
   border: 1px solid rgba(226, 232, 240, 0.9);
   background: #f8fafc;
   padding: 12px;
+}
+
+.chat-check-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+}
+
+.chat-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .chat-row {
@@ -206,6 +253,36 @@ select {
   grid-template-columns: minmax(0, 1fr) 42px auto;
   gap: 8px;
   align-items: center;
+}
+
+.send-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.send-option-input,
+.send-option-select {
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  padding: 0 9px;
+  font-size: 13px;
+}
+
+.send-option-input {
+  width: 86px;
+}
+
+.send-option-input.append-input {
+  width: min(100%, 150px);
 }
 
 .message-input,
@@ -333,6 +410,26 @@ select {
   color: #94a3b8;
 }
 
+.dark .format-switch {
+  border-color: #334155;
+  background: #0f172a;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+
+.dark .format-option {
+  color: #94a3b8;
+}
+
+.dark .format-option:hover {
+  color: #e2e8f0;
+}
+
+.dark .format-option.active {
+  background: linear-gradient(180deg, #164e63, #0e7490);
+  color: #ecfeff;
+  box-shadow: 0 6px 16px rgba(34, 211, 238, 0.16);
+}
+
 .dark .file-input,
 .dark .channel-summary {
   border-color: #334155;
@@ -343,6 +440,10 @@ select {
 .dark .chat-view {
   border-color: #334155;
   background: rgba(15, 23, 42, 0.72);
+}
+
+.dark .chat-check {
+  color: #cbd5e1;
 }
 
 .dark .chat-line {
@@ -367,11 +468,18 @@ select {
 
 .dark .message-input,
 .dark .quick-add-input,
+.dark .send-option-input,
+.dark .send-option-select,
 .dark .quick-menu-button,
 .dark .quick-add-button {
   border-color: #334155;
   background: rgba(15, 23, 42, 0.84);
   color: #e2e8f0;
+}
+
+.dark .send-options {
+  border-color: #334155;
+  background: rgba(15, 23, 42, 0.64);
 }
 
 .dark .quick-menu {

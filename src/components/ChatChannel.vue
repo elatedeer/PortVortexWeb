@@ -18,21 +18,27 @@
           :placeholder="labels.clientIdAuto"
         >
       </div>
-      <label class="flex items-end gap-2 text-sm text-slate-600">
-        <input v-model="channel.showTimestamp" type="checkbox">
-        <span>{{ labels.showTimestamp }}</span>
-      </label>
+      <div class="chat-check-row">
+        <label class="chat-check">
+          <input v-model="channel.showTimestamp" type="checkbox">
+          <span>{{ labels.showTimestamp }}</span>
+        </label>
+        <label class="chat-check">
+          <input v-model="channel.autoScroll" type="checkbox">
+          <span>{{ labels.autoScroll || "自动滚屏" }}</span>
+        </label>
+      </div>
     </div>
 
     <div class="grid gap-3 md:grid-cols-2">
       <div class="field-block">
         <div class="field-label">{{ labels.sendFormat }}</div>
-        <div class="flex flex-wrap gap-2">
+        <div class="format-switch" role="group" :aria-label="labels.sendFormat">
           <button
             v-for="option in labels.formatOptions"
             :key="option.value"
-            :class="['format-pill', channel.sendFormat === option.value ? 'active' : '']"
-            @click="channel.sendFormat = option.value"
+            :class="['format-option', channel.sendFormat === option.value ? 'active' : '']"
+            @click="changeSendFormat(option.value)"
           >
             {{ option.label }}
           </button>
@@ -40,11 +46,11 @@
       </div>
       <div class="field-block">
         <div class="field-label">{{ labels.receiveFormat }}</div>
-        <div class="flex flex-wrap gap-2">
+        <div class="format-switch" role="group" :aria-label="labels.receiveFormat">
           <button
             v-for="option in labels.formatOptions"
             :key="option.value"
-            :class="['format-pill', channel.receiveFormat === option.value ? 'active' : '']"
+            :class="['format-option', channel.receiveFormat === option.value ? 'active' : '']"
             @click="changeReceiveFormat(option.value)"
           >
             {{ option.label }}
@@ -62,7 +68,7 @@
       </button>
     </div>
 
-    <div class="chat-view">
+    <div ref="chatViewRef" class="chat-view">
       <template v-if="channel.messages.length">
         <div
           v-for="item in channel.messages"
@@ -114,18 +120,54 @@
         {{ labels.send }}
       </button>
     </div>
+
+    <div class="send-options">
+      <label class="chat-check">
+        <input v-model="channel.timedEnabled" type="checkbox" @change="emitTimerChange">
+        <span>{{ labels.timedSend || "定时发送" }}</span>
+      </label>
+      <input
+        v-model.number="channel.timedValue"
+        class="send-option-input"
+        type="number"
+        min="1"
+        @input="emitTimerChange"
+      >
+      <select v-model="channel.timedUnit" class="send-option-select" @change="emitTimerChange">
+        <option value="ms">{{ labels.milliseconds || "毫秒" }}</option>
+        <option value="s">{{ labels.seconds || "秒" }}</option>
+      </select>
+      <label class="chat-check">
+        <input v-model="channel.appendEnabled" type="checkbox">
+        <span>{{ labels.appendSuffix || "自动发送附加位" }}</span>
+      </label>
+      <input
+        v-model="channel.appendValue"
+        class="send-option-input append-input"
+        :placeholder="labels.appendValue || '附加位'"
+      >
+    </div>
   </div>
 </template>
 
 <script setup>
+import { nextTick, ref, watch } from "vue";
 import { Delete, MoreFilled, Plus } from "@element-plus/icons-vue";
+import { normalizeHexMessage } from "../utils/messageFormat";
 
 const props = defineProps({
   channel: { type: Object, required: true },
   labels: { type: Object, required: true }
 });
 
-const emit = defineEmits(["connect", "close", "send", "format-change"]);
+const emit = defineEmits(["connect", "close", "send", "format-change", "timer-change"]);
+const chatViewRef = ref(null);
+
+function changeSendFormat(value) {
+  if (props.channel.sendFormat === value) return;
+  props.channel.sendFormat = value;
+  if (value === "hex") props.channel.message = normalizeHexMessage(props.channel.message);
+}
 
 function changeReceiveFormat(value) {
   props.channel.receiveFormat = value;
@@ -143,4 +185,18 @@ function addPhrase() {
 function removePhrase(phrase) {
   props.channel.quickPhrases = props.channel.quickPhrases.filter((item) => item !== phrase);
 }
+
+function emitTimerChange() {
+  emit("timer-change");
+}
+
+watch(
+  () => props.channel.messages.length,
+  async () => {
+    if (!props.channel.autoScroll) return;
+    await nextTick();
+    const target = chatViewRef.value;
+    if (target) target.scrollTop = target.scrollHeight;
+  }
+);
 </script>
