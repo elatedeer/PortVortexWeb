@@ -94,6 +94,29 @@ select {
   letter-spacing: 0;
 }
 
+.token-help-button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  cursor: help;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.token-help-button:hover {
+  background: #0f172a;
+  color: #fff;
+  transform: translateY(-1px);
+}
+
 .format-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -408,6 +431,16 @@ select {
 
 .dark .field-label {
   color: #94a3b8;
+}
+
+.dark .token-help-button {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.dark .token-help-button:hover {
+  background: #e2e8f0;
+  color: #0f172a;
 }
 
 .dark .format-switch {

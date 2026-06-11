@@ -5,6 +5,7 @@ const net = require("net");
 const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
+const zlib = require("zlib");
 
 const PORT = Number(process.env.PORT || 3000);
 const DIST_DIR = path.join(__dirname, "dist");
@@ -27,6 +28,8 @@ const DEFAULTS = {
   erase: "sector",
   qos: 1
 };
+
+const DEVICE_START_TIMEOUT_SECONDS = 10;
 
 const FIXED_HARDWARE = {
   portKind: "uart",
@@ -181,11 +184,16 @@ function mqttString(text) {
 
 function parseAck(payload) {
   const parts = payload.toString("utf8").split(";");
-  const ack = { status: parts[0] || "" };
-  for (const part of parts.slice(1)) {
+  const ack = {};
+  for (const part of parts) {
     const index = part.indexOf("=");
-    if (index > -1) ack[part.slice(0, index)] = part.slice(index + 1);
+    if (index > -1) {
+      ack[part.slice(0, index)] = part.slice(index + 1);
+    } else if (part && !ack.status) {
+      ack.status = part;
+    }
   }
+  if (!ack.status) ack.status = "";
   return ack;
 }
 
@@ -402,6 +410,360 @@ function appendProfileArg(parts, key, value) {
   if (value !== undefined && value !== null && String(value) !== "") parts.push(`${key}=${value}`);
 }
 
+function parseNumber(value, fallback = null) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const text = String(value).trim();
+  const parsed = text.startsWith("0x") || text.startsWith("0X")
+    ? Number.parseInt(text, 16)
+    : Number.parseInt(text, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function hex32(value) {
+  return `0x${(Number(value) >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function readCString(buffer, start, maxLength) {
+  const end = Math.min(buffer.length, start + maxLength);
+  let cursor = start;
+  while (cursor < end && buffer[cursor] !== 0) cursor += 1;
+  return buffer.slice(start, cursor).toString("utf8").replace(/[^\x20-\x7e]/g, "");
+}
+
+function readElfString(table, offset) {
+  if (!table || offset < 0 || offset >= table.length) return "";
+  return readCString(table, offset, table.length - offset);
+}
+
+function alignUp(value, align) {
+  if (!align || align <= 1) return value;
+  return Math.ceil(value / align) * align;
+}
+
+function ensureThumbPc(value) {
+  return hex32((value | 1) >>> 0);
+}
+
+function sectionSymbolOffset(section, symbolValue) {
+  const offset = symbolValue - section.addr;
+  if (offset < 0 || offset >= section.size) return -1;
+  return section.offset + offset;
+}
+
+function isZipContainer(buffer) {
+  return Buffer.isBuffer(buffer) && buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b;
+}
+
+function decodeZipName(bytes, flags) {
+  return bytes.toString((flags & 0x800) ? "utf8" : "latin1").replace(/\\/g, "/");
+}
+
+function findZipEndOfCentralDirectory(buffer) {
+  const minOffset = Math.max(0, buffer.length - 0xffff - 22);
+  for (let offset = buffer.length - 22; offset >= minOffset; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) return offset;
+  }
+  throw new Error("PACK ZIP directory was not found");
+}
+
+function readZipEntries(buffer) {
+  const eocd = findZipEndOfCentralDirectory(buffer);
+  const entryCount = buffer.readUInt16LE(eocd + 10);
+  const centralDirOffset = buffer.readUInt32LE(eocd + 16);
+  const entries = [];
+  let cursor = centralDirOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (cursor + 46 > buffer.length || buffer.readUInt32LE(cursor) !== 0x02014b50) {
+      throw new Error("PACK ZIP central directory is truncated");
+    }
+    const flags = buffer.readUInt16LE(cursor + 8);
+    const method = buffer.readUInt16LE(cursor + 10);
+    const compressedSize = buffer.readUInt32LE(cursor + 20);
+    const uncompressedSize = buffer.readUInt32LE(cursor + 24);
+    const nameLength = buffer.readUInt16LE(cursor + 28);
+    const extraLength = buffer.readUInt16LE(cursor + 30);
+    const commentLength = buffer.readUInt16LE(cursor + 32);
+    const localHeaderOffset = buffer.readUInt32LE(cursor + 42);
+    const name = decodeZipName(buffer.slice(cursor + 46, cursor + 46 + nameLength), flags);
+    entries.push({ name, flags, method, compressedSize, uncompressedSize, localHeaderOffset });
+    cursor += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+function readZipEntryData(buffer, entry) {
+  const offset = entry.localHeaderOffset;
+  if (offset + 30 > buffer.length || buffer.readUInt32LE(offset) !== 0x04034b50) {
+    throw new Error(`PACK ZIP local header is invalid for ${entry.name}`);
+  }
+  if (entry.flags & 0x1) throw new Error(`PACK entry is encrypted: ${entry.name}`);
+  const nameLength = buffer.readUInt16LE(offset + 26);
+  const extraLength = buffer.readUInt16LE(offset + 28);
+  const dataOffset = offset + 30 + nameLength + extraLength;
+  const dataEnd = dataOffset + entry.compressedSize;
+  if (dataEnd > buffer.length) throw new Error(`PACK entry is truncated: ${entry.name}`);
+  const compressed = buffer.slice(dataOffset, dataEnd);
+  if (entry.method === 0) return compressed;
+  if (entry.method === 8) return zlib.inflateRawSync(compressed);
+  throw new Error(`Unsupported PACK ZIP compression method ${entry.method} for ${entry.name}`);
+}
+
+function choosePackFlmEntry(entries, options = {}) {
+  const flmEntries = entries.filter((entry) => /\.flm$/i.test(entry.name) && !entry.name.endsWith("/"));
+  if (!flmEntries.length) throw new Error("PACK file does not contain any .FLM flash algorithm");
+  const hints = [
+    options.packFlm,
+    options.flmName,
+    options.target,
+    options.filename
+  ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+  const explicitHint = Boolean(String(options.packFlm || options.flmName || "").trim());
+  const score = (entry) => {
+    const name = entry.name.toLowerCase();
+    const baseName = path.basename(name);
+    let value = 0;
+    for (const hint of hints) {
+      if (name.includes(hint)) value += 100;
+    }
+    if (name.includes("/flash/")) value += 10;
+    if (!explicitHint && /\b(opt|option|options|otp|ob)\b|[_-](opt|option|options|otp|ob)\./i.test(baseName)) value -= 80;
+    if (!explicitHint && !/(^|[_-])(opt|option|options|otp|ob)([_.\-]|$)/i.test(baseName)) value += 20;
+    if (name.includes("arm")) value += 2;
+    return value;
+  };
+  return [...flmEntries].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name))[0];
+}
+
+function extractPackFlm(buffer, options = {}) {
+  const entries = readZipEntries(buffer);
+  const entry = choosePackFlmEntry(entries, options);
+  return {
+    filename: entry.name,
+    data: readZipEntryData(buffer, entry),
+    pack: {
+      filename: options.filename || "",
+      selectedFlm: entry.name,
+      flmCount: entries.filter((item) => /\.flm$/i.test(item.name)).length
+    }
+  };
+}
+
+function parseAlgorithmFile(file, options = {}) {
+  if (!file) throw new Error("FLM or PACK file is required");
+  const filename = file.filename || options.filename || "";
+  const ext = path.extname(filename).toLowerCase();
+  const flmFile = ext === ".pack" || isZipContainer(file.data)
+    ? extractPackFlm(file.data, { ...options, filename })
+    : { filename, data: file.data, pack: null };
+  const parsed = parseFlm(flmFile.data, {
+    ...options,
+    filename: flmFile.filename,
+    loadAddr: options.loadAddr
+  });
+  return { ...parsed, sourceFile: filename, pack: flmFile.pack };
+}
+
+function parseFlm(buffer, options = {}) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 52) throw new Error("FLM file is too small");
+  if (buffer[0] !== 0x7f || buffer[1] !== 0x45 || buffer[2] !== 0x4c || buffer[3] !== 0x46) {
+    throw new Error("FLM must be an ELF file");
+  }
+  if (buffer[4] !== 1) throw new Error("Only 32-bit FLM ELF files are supported");
+  const littleEndian = buffer[5] === 1;
+  if (!littleEndian && buffer[5] !== 2) throw new Error("Unsupported ELF byte order");
+  const u16 = (offset) => littleEndian ? buffer.readUInt16LE(offset) : buffer.readUInt16BE(offset);
+  const u32 = (offset) => littleEndian ? buffer.readUInt32LE(offset) : buffer.readUInt32BE(offset);
+  const machine = u16(18);
+  if (machine !== 40) throw new Error(`Unsupported FLM machine type ${machine}; expected ARM ELF`);
+
+  const shoff = u32(32);
+  const shentsize = u16(46);
+  const shnum = u16(48);
+  const shstrndx = u16(50);
+  if (!shoff || !shentsize || !shnum) throw new Error("FLM has no section table");
+  if (shoff + shentsize * shnum > buffer.length) throw new Error("FLM section table is truncated");
+
+  const sections = [];
+  for (let i = 0; i < shnum; i += 1) {
+    const offset = shoff + i * shentsize;
+    sections.push({
+      index: i,
+      nameOffset: u32(offset),
+      type: u32(offset + 4),
+      flags: u32(offset + 8),
+      addr: u32(offset + 12),
+      offset: u32(offset + 16),
+      size: u32(offset + 20),
+      link: u32(offset + 24),
+      info: u32(offset + 28),
+      addralign: u32(offset + 32),
+      entsize: u32(offset + 36)
+    });
+  }
+
+  const shstr = sections[shstrndx] && sections[shstrndx].offset + sections[shstrndx].size <= buffer.length
+    ? buffer.slice(sections[shstrndx].offset, sections[shstrndx].offset + sections[shstrndx].size)
+    : Buffer.alloc(0);
+  for (const section of sections) section.name = readElfString(shstr, section.nameOffset);
+
+  const symbols = new Map();
+  for (const section of sections.filter((item) => item.type === 2 || item.type === 11)) {
+    const strtab = sections[section.link];
+    if (!strtab || strtab.offset + strtab.size > buffer.length) continue;
+    const strings = buffer.slice(strtab.offset, strtab.offset + strtab.size);
+    const entrySize = section.entsize || 16;
+    const count = Math.floor(section.size / entrySize);
+    for (let i = 0; i < count; i += 1) {
+      const offset = section.offset + i * entrySize;
+      if (offset + 16 > buffer.length) break;
+      const name = readElfString(strings, u32(offset));
+      if (!name) continue;
+      symbols.set(name, {
+        name,
+        value: u32(offset + 4),
+        size: u32(offset + 8),
+        info: buffer[offset + 12],
+        shndx: u16(offset + 14)
+      });
+    }
+  }
+
+  const loadSections = sections
+    .filter((section) => (section.flags & 0x2) && section.size > 0 && (section.type === 1 || section.type === 8))
+    .sort((a, b) => a.addr - b.addr);
+  if (!loadSections.length) throw new Error("FLM has no loadable SRAM sections");
+  const imageBase = Math.min(...loadSections.map((section) => section.addr));
+  const imageEnd = Math.max(...loadSections.map((section) => section.addr + section.size));
+  if (imageEnd <= imageBase || imageEnd - imageBase > MAX_UPLOAD_BYTES) throw new Error("FLM load image is invalid or too large");
+  const image = Buffer.alloc(imageEnd - imageBase, 0);
+  for (const section of loadSections) {
+    if (section.type !== 1) continue;
+    if (section.offset + section.size > buffer.length) throw new Error(`FLM section ${section.name || section.index} is truncated`);
+    buffer.copy(image, section.addr - imageBase, section.offset, section.offset + section.size);
+  }
+
+  const requestedLoadAddr = parseNumber(options.loadAddr, null);
+  const algoLoadAddr = requestedLoadAddr !== null
+    ? requestedLoadAddr
+    : imageBase >= 0x20000000 ? imageBase : 0x20000000;
+  const absolute = (value) => (algoLoadAddr + (value - imageBase)) >>> 0;
+  const getSymbol = (names, required = true) => {
+    const list = Array.isArray(names) ? names : [names];
+    const symbol = list.map((name) => symbols.get(name)).find(Boolean);
+    if (!symbol && required) throw new Error(`FLM missing required symbol: ${list.join(" or ")}`);
+    return symbol || null;
+  };
+
+  const init = getSymbol("Init");
+  const eraseSector = getSymbol("EraseSector");
+  const programPage = getSymbol("ProgramPage");
+  const flashDeviceSymbol = getSymbol(["FlashDevice", "FlashDev"], false);
+  const uninit = getSymbol("UnInit", false);
+  const eraseChip = getSymbol("EraseChip", false);
+  const blankCheck = getSymbol("BlankCheck", false);
+
+  let flashDevice = null;
+  if (flashDeviceSymbol) {
+    const section = sections[flashDeviceSymbol.shndx];
+    const offset = section ? sectionSymbolOffset(section, flashDeviceSymbol.value) : -1;
+    if (offset >= 0 && offset + 160 <= buffer.length) {
+      const read16 = littleEndian ? Buffer.prototype.readUInt16LE : Buffer.prototype.readUInt16BE;
+      const read32 = littleEndian ? Buffer.prototype.readUInt32LE : Buffer.prototype.readUInt32BE;
+      const sectors = [];
+      for (let cursor = offset + 160; cursor + 8 <= buffer.length; cursor += 8) {
+        const size = read32.call(buffer, cursor);
+        const address = read32.call(buffer, cursor + 4);
+        if (size === 0xffffffff || address === 0xffffffff) break;
+        if (!size && !address) break;
+        sectors.push({ size: hex32(size), address: hex32(address) });
+        if (sectors.length >= 64) break;
+      }
+      flashDevice = {
+        version: hex32(read16.call(buffer, offset)).replace("0x0000", "0x"),
+        name: readCString(buffer, offset + 2, 128).trim(),
+        type: hex32(read16.call(buffer, offset + 130)).replace("0x0000", "0x"),
+        flashBase: hex32(read32.call(buffer, offset + 132)),
+        flashSize: hex32(read32.call(buffer, offset + 136)),
+        pageSize: hex32(read32.call(buffer, offset + 140)),
+        erasedValue: hex32(buffer[offset + 148]).replace("0x000000", "0x"),
+        programTimeoutMs: String(read32.call(buffer, offset + 152)),
+        eraseTimeoutMs: String(read32.call(buffer, offset + 156)),
+        sectors
+      };
+    }
+  }
+
+  const bufferSize = flashDevice ? Math.min(Math.max(parseNumber(flashDevice.pageSize, 0) || 0, 256), 4096) : 1024;
+  const stackSize = 1024;
+  const alignedImageSize = alignUp(image.length, 8);
+  const algoBufferAddr = alignUp(algoLoadAddr + alignedImageSize, 8);
+  const algoDoneAddr = alignUp(algoBufferAddr + bufferSize, 4);
+  const algoStack = alignUp(algoDoneAddr + 4 + stackSize, 8);
+
+  return {
+    filename: options.filename || "",
+    algoBlob: image,
+    algoBlobHex: image.toString("hex"),
+    imageBase: hex32(imageBase),
+    imageSize: image.length,
+    symbols: Object.fromEntries([...symbols.entries()].map(([name, symbol]) => [name, hex32(symbol.value)])),
+    flashDevice,
+    params: {
+      algo: "custom_sram_algo",
+      flashBase: flashDevice?.flashBase || "",
+      eraseSize: flashDevice?.pageSize || "",
+      algoLoadAddr: hex32(algoLoadAddr),
+      algoInitPc: ensureThumbPc(absolute(init.value)),
+      algoErasePc: ensureThumbPc(absolute(eraseSector.value)),
+      algoFullErasePc: eraseChip ? ensureThumbPc(absolute(eraseChip.value)) : "",
+      algoProgramPc: ensureThumbPc(absolute(programPage.value)),
+      algoUninitPc: uninit ? ensureThumbPc(absolute(uninit.value)) : "",
+      algoDoneAddr: hex32(algoDoneAddr),
+      algoDoneMagic: "",
+      algoStack: hex32(algoStack),
+      algoBufferAddr: hex32(algoBufferAddr),
+      algoBufferSize: String(bufferSize),
+      algoTimeoutMs: "",
+      algoInitTimeoutMs: "",
+      algoEraseTimeoutMs: flashDevice?.eraseTimeoutMs || "",
+      algoProgramTimeoutMs: flashDevice?.programTimeoutMs || "",
+      algoInitR0: flashDevice?.flashBase || "",
+      algoInitR1: "",
+      algoInitR2: ""
+    },
+    capabilities: {
+      init: Boolean(init),
+      uninit: Boolean(uninit),
+      eraseChip: Boolean(eraseChip),
+      eraseSector: Boolean(eraseSector),
+      programPage: Boolean(programPage),
+      blankCheck: Boolean(blankCheck)
+    }
+  };
+}
+
+function applyFlmParams(params, flmFile) {
+  if (!flmFile) return { params, algoBlob: null, flm: null };
+  const flm = parseAlgorithmFile(flmFile, {
+    filename: flmFile.filename,
+    loadAddr: params.algoLoadAddr,
+    packFlm: params.packFlm,
+    flmName: params.flmName,
+    target: params.target
+  });
+  const mergedParams = { ...params, algo: "custom_sram_algo" };
+  for (const [key, value] of Object.entries(flm.params)) {
+    if (mergedParams[key] === undefined || mergedParams[key] === null || String(mergedParams[key]) === "") {
+      mergedParams[key] = value;
+    }
+  }
+  return {
+    params: mergedParams,
+    algoBlob: { filename: flm.filename || flmFile.filename, data: flm.algoBlob },
+    flm
+  };
+}
+
 function replaceProfileToken(profile, key, value) {
   const pattern = new RegExp(`(^|;)${key}=[^;]*`);
   return pattern.test(profile)
@@ -468,6 +830,54 @@ function messageFromBuffer(payload, format) {
 
 function payloadFingerprint(payload) {
   return Buffer.from(payload || Buffer.alloc(0)).toString("hex");
+}
+
+function boolFlag(value) {
+  return value === true || value === "1" || value === "true" || value === "on" ? "1" : "0";
+}
+
+function offlineAutoPayload(params) {
+  const mode = params.flashMode === "swd" ? "swd" : "uart";
+  const autoKey = mode === "swd" ? "auto_swd" : "auto_uart";
+  return [
+    "target=offline",
+    `${autoKey}=${boolFlag(params.offlineAutoDownload)}`,
+    `check_version=${boolFlag(params.offlineVersionCheck)}`
+  ].join(";");
+}
+
+async function publishSetAndWait(params, payload) {
+  const mqtt = mqttConfigFromParams(params);
+  const setTopic = topicWithDevicePrefix("/set", mqtt.topicPrefix);
+  const ackTopic = topicWithDevicePrefix("/set/ack", mqtt.topicPrefix);
+  const nonce = crypto.randomBytes(2).toString("hex");
+  const client = new MqttClient(
+    mqtt.broker,
+    mqtt.port,
+    `web-offline-set-${nonce}`,
+    mqtt.username,
+    mqtt.password
+  );
+
+  try {
+    await client.connect();
+    await client.subscribe(ackTopic, 0);
+    await client.publish(setTopic, Buffer.from(payload, "utf8"), 1);
+    const ack = parseAck(await client.waitForMessage(ackTopic, Number(params.ackTimeout || DEFAULTS.ackTimeout)));
+    if (ack.status !== "set" && ack.status !== "status") {
+      throw new Error(`unexpected /set ACK: ${JSON.stringify(ack)}`);
+    }
+    return ack;
+  } finally {
+    client.disconnect();
+  }
+}
+
+async function applyOfflineSettings(params) {
+  const channel = params.flashMode === "swd" ? "SWD" : "UART";
+  const payload = offlineAutoPayload(params);
+  const ack = await publishSetAndWait(params, payload);
+  return { channel, payload, ack };
 }
 
 function getMetaSnapshot() {
@@ -620,6 +1030,17 @@ function buildUartProfile(params, firmwareFormat) {
   return profile;
 }
 
+function appendOfflineStartArgs(baseText, params) {
+  let text = baseText;
+  if (params.storeOnly === "1") {
+    text += ";offline=1";
+    if (params.version) {
+      text += `;version=${params.version};version_addr=${params.versionAddr || "0x0800FFF0"}`;
+    }
+  }
+  return text;
+}
+
 async function runFlashJob(job, params, firmware, algoBlob) {
   const log = (message) => addLog(job, message);
   const mqtt = mqttConfigFromParams(params);
@@ -642,6 +1063,9 @@ async function runFlashJob(job, params, firmware, algoBlob) {
   if (ackTimeout <= 0) throw new Error("ack-timeout must be > 0");
   if (windowSize <= 0 || windowSize > 6) throw new Error("window must be in range 1..6");
   if (![0, 1].includes(qos)) throw new Error("qos must be 0 or 1");
+  if (params.storeOnly === "1" && params.singlePacket === "1") {
+    throw new Error("store-only requires chunked transfer; disable single packet mode");
+  }
   if (params.algoBlobPresent === "1" && params.algo !== "custom_sram_algo") {
     throw new Error("algo blob requires algo custom_sram_algo");
   }
@@ -664,7 +1088,6 @@ async function runFlashJob(job, params, firmware, algoBlob) {
   };
 
   const reconnectAndQueryStatus = async () => {
-    log("MQTT link lost, reconnecting and querying ESP32 progress ...");
     for (let attempt = 1; attempt <= 5; attempt += 1) {
       try {
         const nextClient = await connectClient();
@@ -683,35 +1106,42 @@ async function runFlashJob(job, params, firmware, algoBlob) {
             }
             throw new Error(`Unexpected status ACK: ${JSON.stringify(ack)}`);
           } catch (err) {
-            log(`Waiting for ESP32 reconnect/status... (${probe}/15) ${err.message}`);
             await sleep(2000);
           }
         }
       } catch (err) {
-        log(`Reconnect attempt ${attempt} failed: ${err.message}`);
         await sleep(1000);
       }
     }
-    throw new Error("Unable to reconnect to ESP32 over MQTT");
+    throw new Error("connection failed");
   };
 
   try {
-    log(`Connecting MQTT broker ${broker}:${mqttPort} ...`);
-    client = await connectClient();
-    log(`Setting profile on ${transfer.topics.target}: ${transfer.profile}`);
+    try {
+      client = await connectClient();
+      log("连接成功");
+    } catch (err) {
+      log("连接失败");
+      throw err;
+    }
     await client.publish(transfer.topics.target, Buffer.from(transfer.profile, "utf8"), qos);
     await sleep(200);
 
     if (params.singlePacket === "1" && transfer.singleTopic) {
       log(`Publishing ${transfer.label} in one packet: ${firmware.filename}`);
-      log(`Size: ${firmware.data.length} bytes -> ${transfer.singleTopic}`);
+      log(`Size: ${firmware.data.length} bytes`);
       await client.publish(transfer.singleTopic, firmware.data, qos);
     } else {
       const startPayload = Buffer.from(transfer.startText, "utf8");
       log(`Starting ${transfer.label} transfer: ${firmware.filename}`);
       log(`Format: ${firmwareFormat}, size: ${firmware.data.length} bytes, chunk: ${chunkSize}, window: ${windowSize}`);
       await client.publish(transfer.topics.start, startPayload, qos);
-      const startAck = parseAck(await client.waitForMessage(transfer.topics.ack, ackTimeout));
+      let startAck;
+      try {
+        startAck = parseAck(await client.waitForMessage(transfer.topics.ack, DEVICE_START_TIMEOUT_SECONDS));
+      } catch (err) {
+        throw new Error("设备超时或离线");
+      }
       if (startAck.status !== "start") throw new Error(`Unexpected start ACK: ${JSON.stringify(startAck)}`);
 
       let sent = 0;
@@ -730,14 +1160,18 @@ async function runFlashJob(job, params, firmware, algoBlob) {
         try {
           ack = parseAck(await client.waitForMessage(transfer.topics.ack, ackTimeout));
         } catch (err) {
-          log(`ACK wait failed: ${err.message}`);
           client.disconnect();
           const result = await reconnectAndQueryStatus();
           client = result[0];
           const received = result[1];
           if (received === 0) {
             await client.publish(transfer.topics.start, startPayload, qos);
-            const restartAck = parseAck(await client.waitForMessage(transfer.topics.ack, ackTimeout));
+            let restartAck;
+            try {
+              restartAck = parseAck(await client.waitForMessage(transfer.topics.ack, DEVICE_START_TIMEOUT_SECONDS));
+            } catch (err) {
+              throw new Error("设备超时或离线");
+            }
             if (restartAck.status !== "start") throw new Error(`Unexpected restart ACK: ${JSON.stringify(restartAck)}`);
           }
           acked = received;
@@ -755,15 +1189,16 @@ async function runFlashJob(job, params, firmware, algoBlob) {
         setProgress(job, acked, firmware.data.length);
       }
 
-      await client.publish(transfer.topics.end, Buffer.from("program"), qos);
-      log("Waiting for ESP32 to program target ...");
+      await client.publish(transfer.topics.end, Buffer.from(transfer.endCommand), qos);
+      log(transfer.waitingMessage);
       while (true) {
         const ack = parseAck(await client.waitForMessage(transfer.topics.ack, Math.max(ackTimeout, transfer.programTimeout)));
         log(`ESP32: ${JSON.stringify(ack)}`);
-        if (ack.status === "done") break;
-        if (ack.status.startsWith("error_")) throw new Error(`ESP32 programming failed: ${JSON.stringify(ack)}`);
+        if (ack.status === transfer.finalAckStatus) break;
+        if (ack.status.startsWith("error_")) throw new Error(`ESP32 ${transfer.failureLabel} failed: ${JSON.stringify(ack)}`);
       }
     }
+    if (transfer.successMessage) log(transfer.successMessage);
     setProgress(job, firmware.data.length, firmware.data.length);
     completeJob(job, "done");
   } finally {
@@ -772,6 +1207,7 @@ async function runFlashJob(job, params, firmware, algoBlob) {
 }
 
 function buildTransferConfig(mode, params, firmware, algoBlob, topicPrefix, firmwareFormat) {
+  const isOffline = params.storeOnly === "1";
   if (mode === "uart" || mode === "rs485") {
     const profile = buildUartProfile(params, firmwareFormat);
     return {
@@ -779,7 +1215,12 @@ function buildTransferConfig(mode, params, firmware, algoBlob, topicPrefix, firm
       profile,
       programTimeout: 180,
       singleTopic: null,
-      startText: `size=${firmware.data.length};${profile}`,
+      startText: appendOfflineStartArgs(`size=${firmware.data.length};${profile}`, params),
+      endCommand: isOffline ? "store" : "program",
+      finalAckStatus: isOffline ? "stored" : "done",
+      waitingMessage: isOffline ? "Waiting for ESP32 to store UART firmware ..." : "Waiting for ESP32 UART bootloader programming ...",
+      failureLabel: isOffline ? "UART store" : "UART programming",
+      successMessage: isOffline ? "Stored for offline programming." : "Done. Watch the ESP32 UART log for programming progress.",
       topics: {
         target: `${topicPrefix}/uartflash/target`,
         start: `${topicPrefix}/uartflash/start`,
@@ -799,7 +1240,12 @@ function buildTransferConfig(mode, params, firmware, algoBlob, topicPrefix, firm
       profile,
       programTimeout: 120,
       singleTopic: `${topicPrefix}/hex`,
-      startText: startProfile ? `size=${firmware.data.length};${startProfile}` : `size=${firmware.data.length}`,
+      startText: appendOfflineStartArgs(startProfile ? `size=${firmware.data.length};${startProfile}` : `size=${firmware.data.length}`, params),
+      endCommand: isOffline ? "store" : "program",
+      finalAckStatus: isOffline ? "stored" : "done",
+      waitingMessage: isOffline ? "Waiting for ESP32 to store HEX ..." : "Waiting for ESP32 to program STM32 from HEX ...",
+      failureLabel: isOffline ? "HEX store" : "HEX programming",
+      successMessage: isOffline ? "Stored for offline programming." : "Done. Watch the ESP32 serial log for SWD programming progress.",
       topics: {
         target: `${topicPrefix}/target`,
         start: `${topicPrefix}/hex/start`,
@@ -816,9 +1262,17 @@ function buildTransferConfig(mode, params, firmware, algoBlob, topicPrefix, firm
     profile,
     programTimeout: 120,
     singleTopic: `${topicPrefix}/bin`,
-    startText: startProfile
-      ? `size=${firmware.data.length};${startProfile};base_addr=${params.baseAddr || DEFAULTS.baseAddr}`
-      : `size=${firmware.data.length};base_addr=${params.baseAddr || DEFAULTS.baseAddr}`,
+    startText: appendOfflineStartArgs(
+      startProfile
+        ? `size=${firmware.data.length};${startProfile};base_addr=${params.baseAddr || DEFAULTS.baseAddr}`
+        : `size=${firmware.data.length};base_addr=${params.baseAddr || DEFAULTS.baseAddr}`,
+      params
+    ),
+    endCommand: isOffline ? "store" : "program",
+    finalAckStatus: isOffline ? "stored" : "done",
+    waitingMessage: isOffline ? "Waiting for ESP32 to store firmware ..." : "Waiting for ESP32 to program target ...",
+    failureLabel: isOffline ? "store" : "programming",
+    successMessage: isOffline ? "Stored for offline programming." : "Done. Watch the ESP32 serial log for SWD programming progress.",
     topics: {
       target: `${topicPrefix}/target`,
       start: `${topicPrefix}/bin/start`,
@@ -905,7 +1359,7 @@ async function startChatSession(params) {
 
   await connectChatClients(chat);
   chat.status = "connected";
-  pushChat(chat, { type: "status", status: "connected", message: `Subscribed ${subscribeTopic}, publishing ${publishTopic}` });
+  pushChat(chat, { type: "status", status: "connected", message: "connected" });
   listenForChat(chat);
   return chat;
 }
@@ -970,7 +1424,7 @@ async function listenForChat(chat) {
           await wait(1500);
           await connectChatClients(chat);
           chat.status = "connected";
-          pushChat(chat, { type: "status", status: "connected", message: `Reconnected ${chat.subscribeTopic}` });
+          pushChat(chat, { type: "status", status: "connected", message: "connected" });
           break;
         } catch (reconnectErr) {
           pushChat(chat, { type: "status", status: "reconnecting", message: `Reconnect failed: ${reconnectErr.message}` });
@@ -1090,6 +1544,34 @@ const server = http.createServer(async (req, res) => {
         meta: getMetaSnapshot()
       }), "application/json");
     }
+    if (req.method === "POST" && url.pathname === "/api/offline/settings") {
+      const body = await readJson(req);
+      const result = await applyOfflineSettings(body);
+      return send(res, 200, JSON.stringify({ ok: true, ...result }), "application/json");
+    }
+    if (req.method === "POST" && url.pathname === "/api/flm/parse") {
+      const { fields, files } = await parseMultipart(req);
+      const flmFile = files.flmFile || files.packFile || files.algoFlm || files.algoBlob;
+      if (!flmFile) return send(res, 400, JSON.stringify({ error: "FLM or PACK file is required" }), "application/json");
+      const parsed = parseAlgorithmFile(flmFile, {
+        filename: flmFile.filename,
+        loadAddr: fields.algoLoadAddr,
+        packFlm: fields.packFlm,
+        flmName: fields.flmName,
+        target: fields.target
+      });
+      return send(res, 200, JSON.stringify({
+        ok: true,
+        filename: parsed.filename,
+        sourceFile: parsed.sourceFile,
+        pack: parsed.pack,
+        imageBase: parsed.imageBase,
+        imageSize: parsed.imageSize,
+        params: parsed.params,
+        flashDevice: parsed.flashDevice,
+        capabilities: parsed.capabilities
+      }), "application/json");
+    }
     if (req.method === "POST" && url.pathname === "/api/flash") {
       const { fields, files } = await parseMultipart(req);
       const firmware = files.firmwareFile || files.binFile;
@@ -1097,7 +1579,21 @@ const server = http.createServer(async (req, res) => {
       const id = crypto.randomUUID();
       const job = { id, status: "running", logs: [], clients: new Set(), progress: { done: 0, total: firmware.data.length, percent: 0 } };
       jobs.set(id, job);
-      runFlashJob(job, mergeChipParams(fields), firmware, files.algoBlob).catch((err) => completeJob(job, "error", err.message));
+      setImmediate(() => {
+        try {
+          const mergedParams = mergeChipParams(fields);
+          const flmFile = files.flmFile || files.packFile || files.algoFlm;
+          const flmApplied = applyFlmParams(mergedParams, flmFile);
+          const algoBlob = flmApplied.algoBlob || files.algoBlob;
+          if (flmApplied.flm) {
+            const packInfo = flmApplied.flm.pack ? ` from PACK ${flmApplied.flm.pack.selectedFlm}` : "";
+            addLog(job, `Parsed FLM ${flmApplied.flm.filename || flmFile.filename}${packInfo}: ${flmApplied.flm.imageSize} bytes`);
+          }
+          runFlashJob(job, flmApplied.params, firmware, algoBlob).catch((err) => completeJob(job, "error", err.message));
+        } catch (err) {
+          completeJob(job, "error", err.message);
+        }
+      });
       return send(res, 200, JSON.stringify({ id }), "application/json");
     }
     if (req.method === "POST" && url.pathname === "/api/chat/connect") {

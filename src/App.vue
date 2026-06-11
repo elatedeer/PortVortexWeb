@@ -144,7 +144,13 @@
                   </div>
                   <div class="field-block">
                     <div class="field-label">{{ t.deviceToken }}</div>
-                    <el-input v-model="flash.deviceToken" placeholder="6bf3418a09725d07" />
+                    <el-input v-model="flash.deviceToken" placeholder="6bf3418a09725d07">
+                      <template #append>
+                        <el-tooltip :content="t.deviceTokenHelp" placement="top" effect="light">
+                          <button class="token-help-button" type="button" aria-label="Device token help">?</button>
+                        </el-tooltip>
+                      </template>
+                    </el-input>
                   </div>
                   <div class="field-block lg:col-span-2">
                     <div class="field-label">{{ t.firmware }}</div>
@@ -193,10 +199,24 @@
                   <template #header><span class="text-base font-semibold">{{ t.runtime }}</span></template>
                   <div class="space-y-4">
                     <el-checkbox v-model="flash.noResetAfterProgram">{{ t.noReset }}</el-checkbox>
-                    <el-checkbox v-model="flash.singlePacket">{{ t.singlePacket }}</el-checkbox>
-                    <div class="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4 text-sm text-emerald-800">
-                      {{ t.mqttHidden }}
+                    <el-checkbox v-model="flash.singlePacket" :disabled="flash.storeOnly">{{ t.singlePacket }}</el-checkbox>
+                    <el-checkbox v-model="flash.storeOnly">{{ t.storeOnly }}</el-checkbox>
+                    <el-checkbox v-model="flash.offlineAutoDownload">{{ t.offlineAutoDownload }}</el-checkbox>
+                    <el-checkbox v-model="flash.offlineVersionCheck">{{ t.offlineVersionCheck }}</el-checkbox>
+                    <div v-if="flash.storeOnly" class="grid gap-3 md:grid-cols-2">
+                      <div class="field-block">
+                        <div class="field-label">{{ t.offlineVersion }}</div>
+                        <el-input v-model="flash.version" :placeholder="t.offlineVersionPlaceholder" />
+                      </div>
+                      <div class="field-block">
+                        <div class="field-label">{{ t.offlineVersionAddr }}</div>
+                        <el-input v-model="flash.versionAddr" />
+                      </div>
                     </div>
+                    <div class="text-xs text-slate-500">{{ flash.storeOnly ? t.storeOnlyHint : t.runtimeHint }}</div>
+                    <el-button :loading="offlineSettingsSaving" @click="applyOfflineSettings">
+                      {{ t.applyOfflineSettings }}
+                    </el-button>
                     <div class="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div>
                         <div class="text-sm font-medium">{{ t.expertMode }}</div>
@@ -207,26 +227,6 @@
                   </div>
                 </el-card>
               </div>
-
-              <el-card class="control-card" shadow="never">
-                <template #header>
-                  <div class="flex items-center justify-between gap-4">
-                    <div>
-                      <div class="text-base font-semibold">Chip Config Import</div>
-                      <div class="text-xs text-slate-500">Paste the LLM JSON output to add a target and auto-fill download parameters.</div>
-                    </div>
-                    <el-button :loading="importingChipConfig" type="primary" @click="importChipConfig">
-                      Import
-                    </el-button>
-                  </div>
-                </template>
-                <el-input
-                  v-model="chipConfigInput"
-                  type="textarea"
-                  :rows="7"
-                  placeholder='{"id":"stm32g0","defaults":{"baseAddr":"0x08000000"},"swd":{"profile":"model=stm32g0;flash_base=0x08000000;erase=sector"}}'
-                />
-              </el-card>
 
               <transition name="fade-up">
                 <el-card v-if="expert" class="control-card" shadow="never">
@@ -260,6 +260,15 @@
                           <div class="field-label">{{ t.algoBlob }}</div>
                           <input class="file-input" type="file" @change="onAlgoBlobChange">
                         </div>
+                        <div class="field-block md:col-span-2">
+                          <div class="field-label">{{ t.flmFile }}</div>
+                          <div class="flex flex-col gap-2 sm:flex-row">
+                            <input class="file-input flex-1" type="file" accept=".flm,.FLM,.pack,.PACK,application/octet-stream,application/zip" @change="onFlmFileChange">
+                            <el-button :loading="parsingFlm" :disabled="!flmFile" @click="parseFlmFile">
+                              {{ t.parseFlm }}
+                            </el-button>
+                          </div>
+                        </div>
                         <div class="field-block"><div class="field-label">Algo</div><el-input v-model="flash.algo" placeholder="custom_sram_algo" /></div>
                         <div class="field-block"><div class="field-label">Flash Base</div><el-input v-model="flash.flashBase" /></div>
                         <div class="field-block"><div class="field-label">Erase Size</div><el-input v-model="flash.eraseSize" /></div>
@@ -267,6 +276,25 @@
                           <div class="field-label">{{ field.label }}</div>
                           <el-input v-model="flash[field.key]" />
                         </div>
+                      </div>
+                    </el-tab-pane>
+                    <el-tab-pane :label="t.chipConfigImport">
+                      <div class="space-y-4">
+                        <div class="flex items-center justify-between gap-4">
+                          <div>
+                            <div class="text-base font-semibold">{{ t.chipConfigImport }}</div>
+                            <div class="text-xs text-slate-500">{{ t.chipConfigImportHint }}</div>
+                          </div>
+                          <el-button :loading="importingChipConfig" type="primary" @click="importChipConfig">
+                            {{ t.import }}
+                          </el-button>
+                        </div>
+                        <el-input
+                          v-model="chipConfigInput"
+                          type="textarea"
+                          :rows="7"
+                          placeholder='{"id":"stm32g0","defaults":{"baseAddr":"0x08000000"},"swd":{"profile":"model=stm32g0;flash_base=0x08000000;erase=sector"}}'
+                        />
                       </div>
                     </el-tab-pane>
                   </el-tabs>
@@ -300,17 +328,23 @@
               </template>
               <div class="field-block mb-4">
                 <div class="field-label">{{ t.deviceToken }}</div>
-                <el-input v-model="chatDeviceToken" :disabled="channels.general.connected || channels.rs485.connected" placeholder="6bf3418a09725d07" />
+                <el-input v-model="chatDeviceToken" :disabled="channels.general.connected || channels.rs485.connected" placeholder="6bf3418a09725d07">
+                  <template #append>
+                    <el-tooltip :content="t.deviceTokenHelp" placement="top" effect="light">
+                      <button class="token-help-button" type="button" aria-label="Device token help">?</button>
+                    </el-tooltip>
+                  </template>
+                </el-input>
               </div>
             </el-card>
             <section class="grid gap-5 xl:grid-cols-2">
               <el-card class="control-card" shadow="never">
                 <template #header><span class="text-base font-semibold">{{ t.generalChat }}</span></template>
-                <chat-channel :channel="channels.general" :labels="t" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @format-change="persistChatFormat('general')" @timer-change="syncTimedSend('general')" />
+                <chat-channel :channel="channels.general" :labels="t" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @clear="clearChannel('general')" @format-change="persistChatFormat('general')" @timer-change="syncTimedSend('general')" />
               </el-card>
               <el-card class="control-card" shadow="never">
                 <template #header><span class="text-base font-semibold">{{ t.rs485Chat }}</span></template>
-                <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @format-change="persistChatFormat('rs485')" @timer-change="syncTimedSend('rs485')" />
+                <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @clear="clearChannel('rs485')" @format-change="persistChatFormat('rs485')" @timer-change="syncTimedSend('rs485')" />
               </el-card>
             </section>
           </section>
@@ -498,12 +532,16 @@ const progress = ref(0);
 const logs = ref([]);
 const firmwareFile = ref(null);
 const algoBlobFile = ref(null);
+const flmFile = ref(null);
 const targetOptions = ref(["stm32f1", "stm32f4", "gd32f1", "ch32f2"]);
 const chipConfigs = ref([]);
 const chipConfigInput = ref("");
 const importingChipConfig = ref(false);
+const parsingFlm = ref(false);
+const offlineSettingsSaving = ref(false);
 const meta = reactive({ firmwareVersion: "v1.0.0", onlineEngineerCount: 1, deviceOnline: false });
 let chatMessageSeq = 0;
+const CHAT_QUICK_PHRASES_STORAGE_PREFIX = "portvortex.chat.quickPhrases.";
 const feedbackForm = reactive({ title: "", type: "bug", contact: "", content: "" });
 
 const user = reactive({
@@ -536,6 +574,7 @@ const copy = {
     formatAuto: "格式：自动",
     downloadMode: "下载方式",
     deviceToken: "设备 Token",
+    deviceTokenHelp: "设备 Token 可从设备标签、设备出厂信息或设备管理后台中获取；通常是 productid 后面的那段字符。",
     firmware: "固件文件",
     target: "目标配置",
     targetModel: "目标型号",
@@ -550,6 +589,9 @@ const copy = {
     expertMode: "专家模式",
     expertHint: "传输、串口协议模板和自定义算法参数。",
     forAdvanced: "Advanced",
+    chipConfigImport: "芯片配置导入",
+    chipConfigImportHint: "粘贴 LLM 输出的 JSON，用于新增目标型号并自动填充下载参数。",
+    import: "导入",
     transfer: "传输",
     chunkSize: "分块大小",
     chunkDelay: "分块延迟",
@@ -558,7 +600,10 @@ const copy = {
     uartBootloader: "UART Bootloader",
     customAlgo: "Custom SRAM Algo",
     algoBlob: "Algo blob",
-    algoBlobHelp: "Algo blob 是 custom_sram_algo 使用的目标 SRAM 烧录算法二进制，普通烧录不需要选择。",
+    algoBlobHelp: "Algo blob 是 custom_sram_algo 使用的目标 SRAM 烧录算法二进制；也可以选择 CMSIS FLM 或 PACK 文件自动解析入口和参数。",
+    flmFile: "FLM/PACK 文件",
+    parseFlm: "解析算法",
+    flmParsed: "算法已解析",
     downloadLog: "下载日志",
     liveChat: "实时对话",
     chatHint: "普通主题与 RS485 主题分开连接。",
@@ -595,12 +640,14 @@ const copy = {
     feedbackOther: "其他",
     submitFeedback: "提交反馈",
     clearFeedback: "清空",
+    clearContent: "清空内容",
     authorContact: "作者联系方式",
     feedbackHint: "留下联系方式，便于后续定位和回复。",
     connect: "连接",
     close: "关闭",
     send: "发送",
     connected: "已连接",
+    connectedSuccess: "连接成功",
     topicManaged: "主题由系统自动管理",
     message: "消息",
     waiting: "等待中...",
@@ -637,6 +684,7 @@ const copy = {
     formatAuto: "Format: Auto",
     downloadMode: "Download Mode",
     deviceToken: "Device Token",
+    deviceTokenHelp: "Find the device token on the device label, factory information, or device management backend. It is usually the value after productid.",
     firmware: "Firmware",
     target: "Target",
     targetModel: "Target Model",
@@ -651,6 +699,9 @@ const copy = {
     expertMode: "Expert Mode",
     expertHint: "Transfer, UART protocol template, and custom algorithm parameters.",
     forAdvanced: "Advanced",
+    chipConfigImport: "Chip Config Import",
+    chipConfigImportHint: "Paste the LLM JSON output to add a target and auto-fill download parameters.",
+    import: "Import",
     transfer: "Transfer",
     chunkSize: "Chunk Size",
     chunkDelay: "Chunk Delay",
@@ -659,7 +710,10 @@ const copy = {
     uartBootloader: "UART Bootloader",
     customAlgo: "Custom SRAM Algo",
     algoBlob: "Algo blob",
-    algoBlobHelp: "Algo blob is a raw SRAM flash algorithm binary used only with custom_sram_algo targets.",
+    algoBlobHelp: "Algo blob is a raw SRAM flash algorithm binary. You can also select a CMSIS FLM or PACK file to auto-fill the custom_sram_algo parameters.",
+    flmFile: "FLM/PACK file",
+    parseFlm: "Parse algo",
+    flmParsed: "Algorithm parsed",
     downloadLog: "Download Log",
     liveChat: "Live Chat",
     chatHint: "General and RS485 channels are connected separately.",
@@ -696,12 +750,14 @@ const copy = {
     feedbackOther: "Other",
     submitFeedback: "Submit",
     clearFeedback: "Clear",
+    clearContent: "Clear content",
     authorContact: "Author Contact",
     feedbackHint: "Leave a way to reach you so the issue can be traced and replied to.",
     connect: "Connect",
     close: "Close",
     send: "Send",
     connected: "Connected",
+    connectedSuccess: "Connected",
     topicManaged: "Topics are managed by the system",
     message: "Message",
     waiting: "Waiting...",
@@ -723,6 +779,38 @@ const copy = {
     language: "Language"
   }
 };
+
+Object.assign(copy.zh, {
+  storeOnly: "仅存储到离线固件库",
+  storeOnlyHint: "上传后只存到 ESP32 的离线固件库，不立即烧录；单包模式会自动禁用。",
+  runtimeHint: "默认立即烧录到目标芯片。",
+  offlineVersion: "离线固件版本",
+  offlineVersionPlaceholder: "例如 1.0.3",
+  offlineVersionAddr: "版本地址"
+});
+
+Object.assign(copy.en, {
+  storeOnly: "Store offline only",
+  storeOnlyHint: "Upload only into the ESP32 offline firmware store and do not program immediately. Single packet mode is disabled.",
+  runtimeHint: "The default flow programs the target immediately after upload.",
+  offlineVersion: "Offline firmware version",
+  offlineVersionPlaceholder: "For example 1.0.3",
+  offlineVersionAddr: "Version address"
+});
+
+Object.assign(copy.zh, {
+  offlineAutoDownload: "离线模式自动下载",
+  offlineVersionCheck: "自动下载前检查版本",
+  applyOfflineSettings: "应用离线设置",
+  offlineSettingsSaved: "离线设置已应用"
+});
+
+Object.assign(copy.en, {
+  offlineAutoDownload: "Auto download in offline mode",
+  offlineVersionCheck: "Check version before auto download",
+  applyOfflineSettings: "Apply offline settings",
+  offlineSettingsSaved: "Offline settings applied"
+});
 
 const t = computed(() => copy[lang.value]);
 const pageTitle = computed(() => {
@@ -764,6 +852,11 @@ const flash = reactive({
   erase: "sector",
   attach: "",
   singlePacket: false,
+  storeOnly: false,
+  offlineAutoDownload: false,
+  offlineVersionCheck: false,
+  version: "",
+  versionAddr: "0x0800FFF0",
   noResetAfterProgram: false,
   chunkSize: 2048,
   chunkDelay: 0,
@@ -797,8 +890,8 @@ for (const field of customFields) flash[field.key] = "";
 const chatDeviceToken = ref(DEFAULT_DEVICE_TOKEN);
 
 const channels = reactive({
-  general: createChannelState("/qos1", "/qos0"),
-  rs485: createChannelState("/rs485/qos1", "/rs485/qos0")
+  general: createChannelState("general", "/qos1", "/qos0"),
+  rs485: createChannelState("rs485", "/rs485/qos1", "/rs485/qos0")
 });
 
 const sideNav = computed(() => [
@@ -851,7 +944,27 @@ onBeforeUnmount(() => {
   });
 });
 
-function createChannelState(subscribeTopic, publishTopic) {
+function loadQuickPhrases(key) {
+  if (typeof window === "undefined") return [...QUICK_PHRASES];
+  try {
+    const raw = window.localStorage.getItem(`${CHAT_QUICK_PHRASES_STORAGE_PREFIX}${key}`);
+    if (!raw) return [...QUICK_PHRASES];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...QUICK_PHRASES];
+    const phrases = [...new Set(parsed.map((item) => String(item || "").trim()).filter(Boolean))];
+    return phrases.length ? phrases : [];
+  } catch (_) {
+    return [...QUICK_PHRASES];
+  }
+}
+
+function saveQuickPhrases(key, phrases) {
+  if (typeof window === "undefined") return;
+  const cleaned = [...new Set((phrases || []).map((item) => String(item || "").trim()).filter(Boolean))];
+  window.localStorage.setItem(`${CHAT_QUICK_PHRASES_STORAGE_PREFIX}${key}`, JSON.stringify(cleaned));
+}
+
+function createChannelState(key, subscribeTopic, publishTopic) {
   return reactive({
     id: "",
     connected: false,
@@ -870,7 +983,7 @@ function createChannelState(subscribeTopic, publishTopic) {
     timedTimer: null,
     appendEnabled: false,
     appendValue: "",
-    quickPhrases: [...QUICK_PHRASES],
+    quickPhrases: loadQuickPhrases(key),
     newPhrase: "",
     messages: [],
     events: null
@@ -886,6 +999,9 @@ function syncChatTopics() {
 }
 
 syncChatTopics();
+
+watch(() => channels.general.quickPhrases, (phrases) => saveQuickPhrases("general", phrases), { deep: true });
+watch(() => channels.rs485.quickPhrases, (phrases) => saveQuickPhrases("rs485", phrases), { deep: true });
 
 function syncMetaPayload(payload) {
   targetOptions.value = payload.targets || targetOptions.value;
@@ -978,6 +1094,42 @@ function onAlgoBlobChange(event) {
   algoBlobFile.value = event.target.files[0] || null;
 }
 
+function onFlmFileChange(event) {
+  flmFile.value = event.target.files[0] || null;
+}
+
+async function parseFlmFile() {
+  if (!flmFile.value) return;
+  parsingFlm.value = true;
+  try {
+    const data = new FormData();
+    data.set("flmFile", flmFile.value);
+    appendFormValue(data, "algoLoadAddr", flash.algoLoadAddr);
+    appendFormValue(data, "target", flash.target);
+    const response = await fetch("/api/flm/parse", { method: "POST", body: data });
+    const payload = await readJsonResponse(response, "FLM/PACK parse failed");
+    if (!response.ok) throw new Error(payload.error || "FLM parse failed");
+    applyFlashValues(payload.params || {});
+    expert.value = true;
+    const name = payload.flashDevice?.name ? ` (${payload.flashDevice.name})` : "";
+    ElMessage.success(`${t.value.flmParsed}${name}`);
+  } catch (err) {
+    ElMessage.error(err.message);
+  } finally {
+    parsingFlm.value = false;
+  }
+}
+
+async function readJsonResponse(response, fallbackMessage) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    throw new Error(`${fallbackMessage}: HTTP ${response.status} ${text.slice(0, 120)}`);
+  }
+}
+
 function toggleTheme() {
   darkMode.value = !darkMode.value;
 }
@@ -1023,27 +1175,50 @@ function appendFormValue(data, key, value) {
   else data.set(key, String(value));
 }
 
+async function applyOfflineSettings() {
+  offlineSettingsSaving.value = true;
+  try {
+    const response = await fetch("/api/offline/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deviceToken: flash.deviceToken,
+        flashMode: flash.flashMode,
+        offlineAutoDownload: flash.offlineAutoDownload,
+        offlineVersionCheck: flash.offlineVersionCheck
+      })
+    });
+    const payload = await readJsonResponse(response, "Apply offline settings failed");
+    if (!response.ok) throw new Error(payload.error || "Apply offline settings failed");
+    ElMessage.success(`${t.value.offlineSettingsSaved} (${payload.channel})`);
+  } catch (err) {
+    ElMessage.error(err.message);
+  } finally {
+    offlineSettingsSaving.value = false;
+  }
+}
+
 async function submitFlash() {
   if (!firmwareFile.value) {
     ElMessage.error(t.value.selectFirmware);
     return;
   }
+  if (flash.storeOnly) flash.singlePacket = false;
   flashing.value = true;
   progress.value = 0;
   logs.value = [];
   const data = new FormData();
   data.set("firmwareFile", firmwareFile.value);
   if (algoBlobFile.value) data.set("algoBlob", algoBlobFile.value);
+  if (flmFile.value) data.set("flmFile", flmFile.value);
   for (const [key, value] of Object.entries(flash)) appendFormValue(data, key, value);
   data.set("singlePacket", flash.singlePacket ? "1" : "0");
   data.set("noResetAfterProgram", flash.noResetAfterProgram ? "1" : "0");
-  data.set("algoBlobPresent", algoBlobFile.value ? "1" : "0");
+  data.set("algoBlobPresent", algoBlobFile.value || flmFile.value ? "1" : "0");
   try {
-    pushLog(lang.value === "zh" ? "正在提交下载任务..." : "Submitting download job...");
     const response = await fetch("/api/flash", { method: "POST", body: data });
-    const payload = await response.json();
+    const payload = await readJsonResponse(response, "Create flash job failed");
     if (!response.ok) throw new Error(payload.error || "Failed to create job");
-    pushLog(`Job ID: ${payload.id}`);
     const events = new EventSource(`/api/jobs/${payload.id}/events`);
     events.onmessage = (message) => {
       const eventData = JSON.parse(message.data);
@@ -1053,18 +1228,22 @@ async function submitFlash() {
         pushLog(`Stored: ${eventData.done}/${eventData.total} bytes (${eventData.percent.toFixed(1)}%)`);
       }
       if (eventData.type === "status") {
-        pushLog(eventData.status === "done" ? "Done." : `ERROR: ${eventData.error}`);
+        pushLog(eventData.status === "done"
+          ? (flash.storeOnly ? "Stored for offline programming." : "Done.")
+          : `ERROR: ${eventData.error}`);
         events.close();
         flashing.value = false;
       }
     };
     events.onerror = () => {
-      pushLog("Log stream disconnected.");
       events.close();
       flashing.value = false;
     };
   } catch (err) {
-    pushLog(`ERROR: ${err.message}`);
+    const message = err.message === "Failed to fetch"
+      ? "Failed to fetch /api/flash. Check that the backend on port 3000 is running and reachable from the page."
+      : err.message;
+    pushLog(`ERROR: ${message}`);
     flashing.value = false;
   }
 }
@@ -1072,6 +1251,9 @@ async function submitFlash() {
 watch(chatDeviceToken, syncChatTopics);
 watch(() => flash.target, (target) => applyTargetConfig(target));
 watch(() => flash.flashMode, () => applyTargetConfig(flash.target));
+watch(() => flash.storeOnly, (enabled) => {
+  if (enabled) flash.singlePacket = false;
+});
 
 function pushLog(line) {
   logs.value.push(line);
@@ -1083,14 +1265,24 @@ function pushChannelLog(channel, line) {
 
 function pushChannelMessage(channel, item) {
   const at = item.at ? new Date(item.at) : new Date();
+  const message = item.status === "connected"
+    ? t.value.connectedSuccess
+    : item.message || "";
   channel.messages.push({
     id: ++chatMessageSeq,
     at: formatChatTime(at),
     direction: item.direction || "",
     status: item.status || "",
     topic: item.topic || "",
-    message: item.message || ""
+    message
   });
+}
+
+function clearChannel(key) {
+  const channel = channels[key];
+  channel.messages = [];
+  channel.log = "";
+  channel.message = "";
 }
 
 async function connectChannel(key) {

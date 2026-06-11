@@ -66,6 +66,9 @@
       <button class="el-button" :disabled="!channel.connected" @click="$emit('close')">
         {{ labels.close }}
       </button>
+      <button class="el-button" :disabled="!channel.messages.length && !channel.message" @click="$emit('clear')">
+        {{ labels.clearContent || labels.clearFeedback || "Clear" }}
+      </button>
     </div>
 
     <div ref="chatViewRef" class="chat-view">
@@ -160,7 +163,7 @@ const props = defineProps({
   labels: { type: Object, required: true }
 });
 
-const emit = defineEmits(["connect", "close", "send", "format-change", "timer-change"]);
+const emit = defineEmits(["connect", "close", "send", "clear", "format-change", "timer-change"]);
 const chatViewRef = ref(null);
 
 function changeSendFormat(value) {
