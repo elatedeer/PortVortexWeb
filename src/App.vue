@@ -269,7 +269,18 @@
                             </el-button>
                           </div>
                         </div>
-                        <div class="field-block"><div class="field-label">Algo</div><el-input v-model="flash.algo" placeholder="custom_sram_algo" /></div>
+                        <div v-if="packDevices.length" class="field-block md:col-span-3">
+                          <div class="field-label">PACK Device</div>
+                          <el-select v-model="selectedPackDevice" filterable clearable placeholder="Select supported chip" class="w-full" @change="parseFlmFile">
+                            <el-option
+                              v-for="device in packDevices"
+                              :key="device.name"
+                              :label="`${device.name} | ${device.algorithm} | ${device.start}`"
+                              :value="device.name"
+                            />
+                          </el-select>
+                        </div>
+                        <div class="field-block"><div class="field-label">Algo</div><el-input v-model="flash.algo" placeholder="cmsis_flm or custom_sram_algo" /></div>
                         <div class="field-block"><div class="field-label">Flash Base</div><el-input v-model="flash.flashBase" /></div>
                         <div class="field-block"><div class="field-label">Erase Size</div><el-input v-model="flash.eraseSize" /></div>
                         <div v-for="field in customFields" :key="field.key" class="field-block">
@@ -533,6 +544,8 @@ const logs = ref([]);
 const firmwareFile = ref(null);
 const algoBlobFile = ref(null);
 const flmFile = ref(null);
+const packDevices = ref([]);
+const selectedPackDevice = ref("");
 const targetOptions = ref(["stm32f1", "stm32f4", "gd32f1", "ch32f2"]);
 const chipConfigs = ref([]);
 const chipConfigInput = ref("");
@@ -600,7 +613,7 @@ const copy = {
     uartBootloader: "UART Bootloader",
     customAlgo: "Custom SRAM Algo",
     algoBlob: "Algo blob",
-    algoBlobHelp: "Algo blob 是 custom_sram_algo 使用的目标 SRAM 烧录算法二进制；也可以选择 CMSIS FLM 或 PACK 文件自动解析入口和参数。",
+    algoBlobHelp: "Algo blob 是 custom_sram_algo 使用的目标 SRAM 烧录算法二进制；也可以选择 CMSIS FLM 或 PACK 文件自动解析 cmsis_flm 参数。",
     flmFile: "FLM/PACK 文件",
     parseFlm: "解析算法",
     flmParsed: "算法已解析",
@@ -710,7 +723,7 @@ const copy = {
     uartBootloader: "UART Bootloader",
     customAlgo: "Custom SRAM Algo",
     algoBlob: "Algo blob",
-    algoBlobHelp: "Algo blob is a raw SRAM flash algorithm binary. You can also select a CMSIS FLM or PACK file to auto-fill the custom_sram_algo parameters.",
+    algoBlobHelp: "Algo blob is a raw SRAM flash algorithm binary. You can also select a CMSIS FLM or PACK file to auto-fill cmsis_flm parameters.",
     flmFile: "FLM/PACK file",
     parseFlm: "Parse algo",
     flmParsed: "Algorithm parsed",
@@ -1041,10 +1054,11 @@ function applyFlashValues(values = {}) {
 function applyTargetConfig(target) {
   const config = findTargetConfig(target);
   if (!config) return;
+  const requestedTarget = flash.target || target || config.id;
   const mode = flash.flashMode === "rs485" ? "rs485" : flash.flashMode === "uart" ? "uart" : "swd";
   applyFlashValues(config.defaults);
   applyFlashValues(config[mode]);
-  flash.target = config.id;
+  flash.target = requestedTarget;
 }
 
 function extractChipConfigJson(text) {
@@ -1096,6 +1110,8 @@ function onAlgoBlobChange(event) {
 
 function onFlmFileChange(event) {
   flmFile.value = event.target.files[0] || null;
+  packDevices.value = [];
+  selectedPackDevice.value = "";
 }
 
 async function parseFlmFile() {
@@ -1106,9 +1122,12 @@ async function parseFlmFile() {
     data.set("flmFile", flmFile.value);
     appendFormValue(data, "algoLoadAddr", flash.algoLoadAddr);
     appendFormValue(data, "target", flash.target);
+    appendFormValue(data, "packDevice", selectedPackDevice.value);
     const response = await fetch("/api/flm/parse", { method: "POST", body: data });
     const payload = await readJsonResponse(response, "FLM/PACK parse failed");
     if (!response.ok) throw new Error(payload.error || "FLM parse failed");
+    packDevices.value = payload.pack?.devices || [];
+    if (selectedPackDevice.value) flash.target = selectedPackDevice.value;
     applyFlashValues(payload.params || {});
     expert.value = true;
     const name = payload.flashDevice?.name ? ` (${payload.flashDevice.name})` : "";
@@ -1212,6 +1231,7 @@ async function submitFlash() {
   if (algoBlobFile.value) data.set("algoBlob", algoBlobFile.value);
   if (flmFile.value) data.set("flmFile", flmFile.value);
   for (const [key, value] of Object.entries(flash)) appendFormValue(data, key, value);
+  appendFormValue(data, "packDevice", selectedPackDevice.value);
   data.set("singlePacket", flash.singlePacket ? "1" : "0");
   data.set("noResetAfterProgram", flash.noResetAfterProgram ? "1" : "0");
   data.set("algoBlobPresent", algoBlobFile.value || flmFile.value ? "1" : "0");

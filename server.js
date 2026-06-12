@@ -158,8 +158,7 @@ function mergeChipParams(params) {
   return {
     ...(config.defaults || {}),
     ...(config[mode] || {}),
-    ...params,
-    target: config.id
+    ...params
   };
 }
 
@@ -440,6 +439,32 @@ function alignUp(value, align) {
   return Math.ceil(value / align) * align;
 }
 
+function findEraseSizeFromSectors(flashDevice) {
+  if (!flashDevice?.sectors?.length) return "";
+  const flashBase = parseNumber(flashDevice.flashBase, null);
+  const flashSize = parseNumber(flashDevice.flashSize, null);
+  const flashEnd = flashBase !== null && flashSize !== null ? flashBase + flashSize : null;
+  const sectors = flashDevice.sectors
+    .map((sector) => ({
+      size: parseNumber(sector.size, null),
+      address: parseNumber(sector.address, null)
+    }))
+    .filter((sector) => sector.size && sector.address !== null)
+    .sort((a, b) => a.address - b.address);
+  if (!sectors.length) return "";
+  if (flashBase !== null && sectors.every((sector) => sector.address < flashBase)) {
+    for (const sector of sectors) sector.address += flashBase;
+  }
+  if (flashBase !== null) {
+    for (let index = 0; index < sectors.length; index += 1) {
+      const sector = sectors[index];
+      const nextAddress = sectors[index + 1]?.address ?? flashEnd ?? sector.address + sector.size;
+      if (flashBase >= sector.address && flashBase < nextAddress) return hex32(sector.size);
+    }
+  }
+  return hex32(sectors[0].size);
+}
+
 function ensureThumbPc(value) {
   return hex32((value | 1) >>> 0);
 }
@@ -508,9 +533,138 @@ function readZipEntryData(buffer, entry) {
   throw new Error(`Unsupported PACK ZIP compression method ${entry.method} for ${entry.name}`);
 }
 
-function choosePackFlmEntry(entries, options = {}) {
+function normalizePackName(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function parseXmlAttributes(tag) {
+  const attrs = {};
+  String(tag || "").replace(/([A-Za-z_:][\w:.-]*)\s*=\s*"([^"]*)"/g, (_, key, value) => {
+    attrs[key] = value;
+    return "";
+  });
+  return attrs;
+}
+
+function readPackTextEntry(buffer, entry) {
+  return readZipEntryData(buffer, entry).toString("utf8");
+}
+
+function findPackAlgorithmsInBlock(block) {
+  const matches = [...String(block || "").matchAll(/<algorithm\b[^>]*>/gi)];
+  return matches.map((match) => parseXmlAttributes(match[0])).filter((algo) => algo.name);
+}
+
+function isOptionAlgorithm(algo) {
+  return /(opt|otp|option|ob)([_.\-]|$)|quad[_-]?spi|qspi|ospi/i.test(algo.name || "");
+}
+
+function findPackAlgorithmInBlock(block) {
+  const valid = findPackAlgorithmsInBlock(block);
+  return valid.find((algo) =>
+    algo.default === "1" &&
+    /^0x08000000$/i.test(algo.start || "") &&
+    !isOptionAlgorithm(algo)
+  ) || valid.find((algo) =>
+    algo.default === "1" &&
+    /^0x080/i.test(algo.start || "") &&
+    !isOptionAlgorithm(algo)
+  ) || valid.find((algo) =>
+    /^0x080/i.test(algo.start || "") &&
+    !isOptionAlgorithm(algo)
+  ) || valid.find((algo) =>
+    algo.default === "1" &&
+    !isOptionAlgorithm(algo)
+  ) || valid.find((algo) =>
+    !isOptionAlgorithm(algo)
+  ) || valid.find((algo) =>
+    algo.default === "1"
+  ) || valid[0] || null;
+}
+
+function collectPackVariants(block) {
+  return [...String(block || "").matchAll(/<variant\b[^>]*>/gi)]
+    .map((match) => parseXmlAttributes(match[0]).Dvariant)
+    .filter(Boolean);
+}
+
+function collectPackDevices(pdscText) {
+  if (!pdscText) return [];
+  const seen = new Set();
+  const devices = [];
+  for (const match of pdscText.matchAll(/<device\b[^>]*>[\s\S]*?<\/device>/gi)) {
+    const block = match[0];
+    const attrs = parseXmlAttributes(block.match(/<device\b[^>]*>/i)?.[0] || "");
+    const algorithm = findPackAlgorithmInBlock(block);
+    if (!attrs.Dname || !algorithm?.name) continue;
+    const addDevice = (name, parent = "") => {
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      devices.push({
+        name,
+        parent,
+        algorithm: algorithm.name,
+        start: algorithm.start || "",
+        size: algorithm.size || "",
+        default: algorithm.default || ""
+      });
+    };
+    addDevice(attrs.Dname);
+    for (const variant of collectPackVariants(block)) addDevice(variant, attrs.Dname);
+  }
+  return devices.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function findMatchingPackAlgorithm(pdscText, target) {
+  const normalizedTarget = normalizePackName(target);
+  if (!pdscText || !normalizedTarget) return null;
+  const deviceBlocks = [...pdscText.matchAll(/<device\b[^>]*>[\s\S]*?<\/device>/gi)];
+  for (const match of deviceBlocks) {
+    const block = match[0];
+    const attrs = parseXmlAttributes(block.match(/<device\b[^>]*>/i)?.[0] || "");
+    const names = [attrs.Dname, ...collectPackVariants(block), attrs.Dvendor].map(normalizePackName);
+    if (names.some((name) => name && (normalizedTarget.startsWith(name) || name.startsWith(normalizedTarget)))) {
+      const algorithm = findPackAlgorithmInBlock(block);
+      if (algorithm) return algorithm;
+    }
+  }
+
+  const subFamilyBlocks = [...pdscText.matchAll(/<subFamily\b[^>]*>[\s\S]*?<\/subFamily>/gi)];
+  for (const match of subFamilyBlocks) {
+    const block = match[0];
+    const attrs = parseXmlAttributes(block.match(/<subFamily\b[^>]*>/i)?.[0] || "");
+    const name = normalizePackName(attrs.DsubFamily);
+    if (name && (normalizedTarget.startsWith(name) || name.startsWith(normalizedTarget))) {
+      const algorithm = findPackAlgorithmInBlock(block);
+      if (algorithm) return algorithm;
+    }
+  }
+
+  return null;
+}
+
+function choosePackFlmEntry(entries, options = {}, pdscText = "") {
   const flmEntries = entries.filter((entry) => /\.flm$/i.test(entry.name) && !entry.name.endsWith("/"));
   if (!flmEntries.length) throw new Error("PACK file does not contain any .FLM flash algorithm");
+  const explicitName = String(options.packFlm || options.flmName || "").trim().toLowerCase();
+  if (explicitName) {
+    const explicitEntry = flmEntries.find((entry) =>
+      entry.name.toLowerCase() === explicitName ||
+      path.basename(entry.name).toLowerCase() === explicitName ||
+      entry.name.toLowerCase().includes(explicitName)
+    );
+    if (explicitEntry) return { entry: explicitEntry, algorithm: null };
+  }
+  const selectedDevice = String(options.packDevice || "").trim();
+  const pdscAlgorithm = findMatchingPackAlgorithm(pdscText, selectedDevice || options.target);
+  if (pdscAlgorithm?.name) {
+    const algorithmName = pdscAlgorithm.name.toLowerCase();
+    const pdscEntry = flmEntries.find((entry) =>
+      entry.name.toLowerCase() === algorithmName ||
+      path.basename(entry.name).toLowerCase() === path.basename(algorithmName)
+    );
+    if (pdscEntry) return { entry: pdscEntry, algorithm: pdscAlgorithm };
+  }
   const hints = [
     options.packFlm,
     options.flmName,
@@ -531,18 +685,23 @@ function choosePackFlmEntry(entries, options = {}) {
     if (name.includes("arm")) value += 2;
     return value;
   };
-  return [...flmEntries].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name))[0];
+  return { entry: [...flmEntries].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name))[0], algorithm: null };
 }
 
 function extractPackFlm(buffer, options = {}) {
   const entries = readZipEntries(buffer);
-  const entry = choosePackFlmEntry(entries, options);
+  const pdscEntry = entries.find((entry) => /\.pdsc$/i.test(entry.name));
+  const pdscText = pdscEntry ? readPackTextEntry(buffer, pdscEntry) : "";
+  const devices = collectPackDevices(pdscText);
+  const { entry, algorithm } = choosePackFlmEntry(entries, options, pdscText);
   return {
     filename: entry.name,
     data: readZipEntryData(buffer, entry),
     pack: {
       filename: options.filename || "",
       selectedFlm: entry.name,
+      selectedAlgorithm: algorithm || null,
+      devices,
       flmCount: entries.filter((item) => /\.flm$/i.test(item.name)).length
     }
   };
@@ -558,7 +717,8 @@ function parseAlgorithmFile(file, options = {}) {
   const parsed = parseFlm(flmFile.data, {
     ...options,
     filename: flmFile.filename,
-    loadAddr: options.loadAddr
+    loadAddr: options.loadAddr,
+    algorithm: flmFile.pack?.selectedAlgorithm || null
   });
   return { ...parsed, sourceFile: filename, pack: flmFile.pack };
 }
@@ -694,6 +854,9 @@ function parseFlm(buffer, options = {}) {
   }
 
   const bufferSize = flashDevice ? Math.min(Math.max(parseNumber(flashDevice.pageSize, 0) || 0, 256), 4096) : 1024;
+  const eraseSize = findEraseSizeFromSectors(flashDevice);
+  const algorithmStart = options.algorithm?.start || "";
+  const resolvedFlashBase = flashDevice?.flashBase || algorithmStart || DEFAULTS.baseAddr;
   const stackSize = 1024;
   const alignedImageSize = alignUp(image.length, 8);
   const algoBufferAddr = alignUp(algoLoadAddr + alignedImageSize, 8);
@@ -709,9 +872,10 @@ function parseFlm(buffer, options = {}) {
     symbols: Object.fromEntries([...symbols.entries()].map(([name, symbol]) => [name, hex32(symbol.value)])),
     flashDevice,
     params: {
-      algo: "custom_sram_algo",
-      flashBase: flashDevice?.flashBase || "",
-      eraseSize: flashDevice?.pageSize || "",
+      algo: "cmsis_flm",
+      baseAddr: resolvedFlashBase,
+      flashBase: resolvedFlashBase,
+      eraseSize,
       algoLoadAddr: hex32(algoLoadAddr),
       algoInitPc: ensureThumbPc(absolute(init.value)),
       algoErasePc: ensureThumbPc(absolute(eraseSector.value)),
@@ -727,8 +891,8 @@ function parseFlm(buffer, options = {}) {
       algoInitTimeoutMs: "",
       algoEraseTimeoutMs: flashDevice?.eraseTimeoutMs || "",
       algoProgramTimeoutMs: flashDevice?.programTimeoutMs || "",
-      algoInitR0: flashDevice?.flashBase || "",
-      algoInitR1: "",
+      algoInitR0: resolvedFlashBase,
+      algoInitR1: "168000000",
       algoInitR2: ""
     },
     capabilities: {
@@ -749,9 +913,10 @@ function applyFlmParams(params, flmFile) {
     loadAddr: params.algoLoadAddr,
     packFlm: params.packFlm,
     flmName: params.flmName,
+    packDevice: params.packDevice,
     target: params.target
   });
-  const mergedParams = { ...params, algo: "custom_sram_algo" };
+  const mergedParams = { ...params, algo: "cmsis_flm" };
   for (const [key, value] of Object.entries(flm.params)) {
     if (mergedParams[key] === undefined || mergedParams[key] === null || String(mergedParams[key]) === "") {
       mergedParams[key] = value;
@@ -909,24 +1074,7 @@ function stripProfileTokens(profile, keys) {
 }
 
 function buildProfile(params, algoBlob) {
-  let profileBase = stripProfileTokens(params.profile, [
-    "swdio_gpio",
-    "swclk_gpio",
-    "nrst_gpio",
-    "use_nrst"
-  ]);
-  if (profileBase && params.eraseExplicit === "1") {
-    profileBase = replaceProfileToken(profileBase, "erase", params.erase);
-  }
-  const parts = profileBase ? [profileBase] : [`model=${params.target || DEFAULTS.target}`];
-  appendProfileArg(parts, "algo", params.algo);
-  appendProfileArg(parts, "flash_base", params.flashBase);
-  appendProfileArg(parts, "erase_size", params.eraseSize);
-  appendProfileArg(parts, "attach", params.attach);
-  if (!profileBase || !profileBase.includes("erase=")) parts.push(`erase=${params.erase || DEFAULTS.erase}`);
-  parts.push(`reset_after_program=${params.noResetAfterProgram === "1" ? 0 : 1}`);
-
-  if (params.algo === "custom_sram_algo") {
+  if (params.algo === "custom_sram_algo" || params.algo === "cmsis_flm") {
     const required = [
       ["algo blob file", algoBlob],
       ["algo-load-addr", params.algoLoadAddr],
@@ -938,8 +1086,15 @@ function buildProfile(params, algoBlob) {
       ["algo-buffer-size", params.algoBufferSize]
     ];
     const missing = required.filter(([, value]) => !value).map(([name]) => name);
-    if (missing.length) throw new Error(`custom_sram_algo missing required arguments: ${missing.join(", ")}`);
-    parts.push(`algo_blob_hex=${algoBlob.data.toString("hex")}`);
+    if (missing.length) throw new Error(`${params.algo} missing required arguments: ${missing.join(", ")}`);
+
+    const parts = [
+      `model=${params.target || DEFAULTS.target}`,
+      `algo=${params.algo}`,
+      `flash_base=${params.baseAddr || DEFAULTS.baseAddr}`
+    ];
+    appendProfileArg(parts, "erase_size", params.eraseSize);
+    parts.push("algo_blob_ref=last");
     appendProfileArg(parts, "algo_load_addr", params.algoLoadAddr);
     appendProfileArg(parts, "algo_init_pc", params.algoInitPc);
     appendProfileArg(parts, "algo_erase_pc", params.algoErasePc);
@@ -958,7 +1113,29 @@ function buildProfile(params, algoBlob) {
     appendProfileArg(parts, "algo_init_r0", params.algoInitR0);
     appendProfileArg(parts, "algo_init_r1", params.algoInitR1);
     appendProfileArg(parts, "algo_init_r2", params.algoInitR2);
+    appendProfileArg(parts, "attach", params.attach);
+    parts.push(`erase=${params.erase || DEFAULTS.erase}`);
+    parts.push(`reset_after_program=${params.noResetAfterProgram === "1" ? 0 : 1}`);
+    return parts.map((part) => String(part).replace(/^;+|;+$/g, "")).filter(Boolean).join(";");
   }
+
+  let profileBase = stripProfileTokens(params.profile, [
+    "swdio_gpio",
+    "swclk_gpio",
+    "nrst_gpio",
+    "use_nrst"
+  ]);
+  if (profileBase && params.eraseExplicit === "1") {
+    profileBase = replaceProfileToken(profileBase, "erase", params.erase);
+  }
+  const parts = profileBase ? [profileBase] : [`model=${params.target || DEFAULTS.target}`];
+  appendProfileArg(parts, "algo", params.algo);
+  appendProfileArg(parts, "flash_base", params.flashBase || (usesUploadedAlgoBlob(params) ? params.baseAddr || DEFAULTS.baseAddr : ""));
+  appendProfileArg(parts, "erase_size", params.eraseSize);
+  appendProfileArg(parts, "attach", params.attach);
+  if (!profileBase || !profileBase.includes("erase=")) parts.push(`erase=${params.erase || DEFAULTS.erase}`);
+  parts.push(`reset_after_program=${params.noResetAfterProgram === "1" ? 0 : 1}`);
+
   return parts.map((part) => String(part).replace(/^;+|;+$/g, "")).filter(Boolean).join(";");
 }
 
@@ -1041,6 +1218,55 @@ function appendOfflineStartArgs(baseText, params) {
   return text;
 }
 
+function usesUploadedAlgoBlob(params) {
+  return params.algo === "custom_sram_algo" || params.algo === "cmsis_flm";
+}
+
+function summarizeMqttPayload(payload) {
+  return String(payload || "").replace(
+    /algo_blob_hex=([0-9a-fA-F]{64})[0-9a-fA-F]*/g,
+    "algo_blob_hex=$1..."
+  );
+}
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+async function uploadAlgoBlob(client, job, transfer, algoBlob, options) {
+  const log = (message) => addLog(job, message);
+  const data = algoBlob.data;
+  const chunkSize = options.chunkSize;
+  const ackTimeout = options.ackTimeout;
+  const qos = options.qos;
+  const checksum = crc32(data).toString(16).padStart(8, "0");
+  const startText = `size=${data.length};crc32=0x${checksum}`;
+
+  log(`Uploading target algorithm blob to ${transfer.topics.algoStart}: ${startText}`);
+  await client.publish(transfer.topics.algoStart, Buffer.from(startText, "utf8"), qos);
+
+  for (let offset = 0; offset < data.length; offset += chunkSize) {
+    const chunk = data.slice(offset, offset + chunkSize);
+    await client.publish(transfer.topics.algoChunk, Buffer.concat([uint32(offset), chunk]), qos);
+  }
+
+  await client.publish(transfer.topics.algoEnd, Buffer.alloc(0), qos);
+  log(`Waiting for ESP32 algorithm upload ACK on ${transfer.topics.algoAck} ...`);
+  while (true) {
+    const ack = parseAck(await client.waitForMessage(transfer.topics.algoAck, Math.max(ackTimeout, 30)));
+    log(`ESP32 algo: ${JSON.stringify(ack)}`);
+    if (ack.status === "done") break;
+    if (ack.status.startsWith("error_")) throw new Error(`ESP32 algorithm upload failed: ${JSON.stringify(ack)}`);
+  }
+}
+
 async function runFlashJob(job, params, firmware, algoBlob) {
   const log = (message) => addLog(job, message);
   const mqtt = mqttConfigFromParams(params);
@@ -1066,8 +1292,8 @@ async function runFlashJob(job, params, firmware, algoBlob) {
   if (params.storeOnly === "1" && params.singlePacket === "1") {
     throw new Error("store-only requires chunked transfer; disable single packet mode");
   }
-  if (params.algoBlobPresent === "1" && params.algo !== "custom_sram_algo") {
-    throw new Error("algo blob requires algo custom_sram_algo");
+  if (params.algoBlobPresent === "1" && !usesUploadedAlgoBlob(params)) {
+    throw new Error("algo blob requires algo custom_sram_algo or cmsis_flm");
   }
 
   const transfer = buildTransferConfig(mode, params, firmware, algoBlob, topicPrefix, firmwareFormat);
@@ -1084,6 +1310,7 @@ async function runFlashJob(job, params, firmware, algoBlob) {
     );
     await newClient.connect();
     await newClient.subscribe(transfer.topics.ack, 0);
+    if (transfer.topics.algoAck) await newClient.subscribe(transfer.topics.algoAck, 0);
     return newClient;
   };
 
@@ -1124,10 +1351,26 @@ async function runFlashJob(job, params, firmware, algoBlob) {
       log("连接失败");
       throw err;
     }
-    await client.publish(transfer.topics.target, Buffer.from(transfer.profile, "utf8"), qos);
-    await sleep(200);
+    if (usesUploadedAlgoBlob(params)) {
+      await uploadAlgoBlob(client, job, transfer, algoBlob, { chunkSize, ackTimeout, qos });
+    }
 
-    if (params.singlePacket === "1" && transfer.singleTopic) {
+    log(`Publishing target profile to ${transfer.topics.target}: ${summarizeMqttPayload(transfer.profile)}`);
+    await client.publish(transfer.topics.target, Buffer.from(transfer.profile, "utf8"), qos);
+    if (usesUploadedAlgoBlob(params)) {
+      const delayMs = Number(params.targetApplyDelayMs || 500);
+      log(`Waiting ${delayMs}ms for ESP32 to queue target profile before firmware transfer ...`);
+      await sleep(delayMs);
+    } else {
+      await sleep(200);
+    }
+
+    const useSinglePacket = params.singlePacket === "1" && transfer.singleTopic && !usesUploadedAlgoBlob(params);
+    if (params.singlePacket === "1" && transfer.singleTopic && usesUploadedAlgoBlob(params)) {
+      log(`Single packet mode is disabled for ${params.algo}; using /bin/start, /bin/chunk and /bin/end.`);
+    }
+
+    if (useSinglePacket) {
       log(`Publishing ${transfer.label} in one packet: ${firmware.filename}`);
       log(`Size: ${firmware.data.length} bytes`);
       await client.publish(transfer.singleTopic, firmware.data, qos);
@@ -1135,6 +1378,7 @@ async function runFlashJob(job, params, firmware, algoBlob) {
       const startPayload = Buffer.from(transfer.startText, "utf8");
       log(`Starting ${transfer.label} transfer: ${firmware.filename}`);
       log(`Format: ${firmwareFormat}, size: ${firmware.data.length} bytes, chunk: ${chunkSize}, window: ${windowSize}`);
+      log(`Publishing start to ${transfer.topics.start}: ${transfer.startText}`);
       await client.publish(transfer.topics.start, startPayload, qos);
       let startAck;
       try {
@@ -1147,6 +1391,7 @@ async function runFlashJob(job, params, firmware, algoBlob) {
       let sent = 0;
       let acked = 0;
       let inFlight = 0;
+      log(`Publishing firmware chunks to ${transfer.topics.chunk} ...`);
       while (acked < firmware.data.length) {
         while (inFlight < windowSize && sent < firmware.data.length) {
           const chunk = firmware.data.slice(sent, sent + chunkSize);
@@ -1189,6 +1434,7 @@ async function runFlashJob(job, params, firmware, algoBlob) {
         setProgress(job, acked, firmware.data.length);
       }
 
+      log(`Publishing end to ${transfer.topics.end}: ${transfer.endCommand}`);
       await client.publish(transfer.topics.end, Buffer.from(transfer.endCommand), qos);
       log(transfer.waitingMessage);
       while (true) {
@@ -1233,21 +1479,27 @@ function buildTransferConfig(mode, params, firmware, algoBlob, topicPrefix, firm
   }
 
   const profile = buildProfile(params, algoBlob);
-  const startProfile = params.algo === "custom_sram_algo" ? "" : profile;
+  const forceProgram = usesUploadedAlgoBlob(params);
+  const startProfile = usesUploadedAlgoBlob(params) ? "" : profile;
   if (firmwareFormat === "hex") {
+    const startText = startProfile ? `size=${firmware.data.length};${startProfile}` : `size=${firmware.data.length}`;
     return {
       label: "SWD HEX",
       profile,
       programTimeout: 120,
       singleTopic: `${topicPrefix}/hex`,
-      startText: appendOfflineStartArgs(startProfile ? `size=${firmware.data.length};${startProfile}` : `size=${firmware.data.length}`, params),
-      endCommand: isOffline ? "store" : "program",
-      finalAckStatus: isOffline ? "stored" : "done",
-      waitingMessage: isOffline ? "Waiting for ESP32 to store HEX ..." : "Waiting for ESP32 to program STM32 from HEX ...",
-      failureLabel: isOffline ? "HEX store" : "HEX programming",
-      successMessage: isOffline ? "Stored for offline programming." : "Done. Watch the ESP32 serial log for SWD programming progress.",
+      startText: forceProgram ? startText : appendOfflineStartArgs(startText, params),
+      endCommand: forceProgram || !isOffline ? "program" : "store",
+      finalAckStatus: forceProgram || !isOffline ? "done" : "stored",
+      waitingMessage: forceProgram || !isOffline ? "Waiting for ESP32 to program STM32 from HEX ..." : "Waiting for ESP32 to store HEX ...",
+      failureLabel: forceProgram || !isOffline ? "HEX programming" : "HEX store",
+      successMessage: forceProgram || !isOffline ? "Done. Watch the ESP32 serial log for SWD programming progress." : "Stored for offline programming.",
       topics: {
         target: `${topicPrefix}/target`,
+        algoStart: `${topicPrefix}/algo/start`,
+        algoChunk: `${topicPrefix}/algo/chunk`,
+        algoEnd: `${topicPrefix}/algo/end`,
+        algoAck: `${topicPrefix}/algo/ack`,
         start: `${topicPrefix}/hex/start`,
         chunk: `${topicPrefix}/hex/chunk`,
         end: `${topicPrefix}/hex/end`,
@@ -1257,24 +1509,26 @@ function buildTransferConfig(mode, params, firmware, algoBlob, topicPrefix, firm
     };
   }
 
+  const binStartText = startProfile
+    ? `size=${firmware.data.length};${startProfile};base_addr=${params.baseAddr || DEFAULTS.baseAddr}`
+    : `size=${firmware.data.length};base_addr=${params.baseAddr || DEFAULTS.baseAddr}`;
   return {
     label: "SWD BIN",
     profile,
     programTimeout: 120,
     singleTopic: `${topicPrefix}/bin`,
-    startText: appendOfflineStartArgs(
-      startProfile
-        ? `size=${firmware.data.length};${startProfile};base_addr=${params.baseAddr || DEFAULTS.baseAddr}`
-        : `size=${firmware.data.length};base_addr=${params.baseAddr || DEFAULTS.baseAddr}`,
-      params
-    ),
-    endCommand: isOffline ? "store" : "program",
-    finalAckStatus: isOffline ? "stored" : "done",
-    waitingMessage: isOffline ? "Waiting for ESP32 to store firmware ..." : "Waiting for ESP32 to program target ...",
-    failureLabel: isOffline ? "store" : "programming",
-    successMessage: isOffline ? "Stored for offline programming." : "Done. Watch the ESP32 serial log for SWD programming progress.",
+    startText: forceProgram ? binStartText : appendOfflineStartArgs(binStartText, params),
+    endCommand: forceProgram || !isOffline ? "program" : "store",
+    finalAckStatus: forceProgram || !isOffline ? "done" : "stored",
+    waitingMessage: forceProgram || !isOffline ? "Waiting for ESP32 to program target ..." : "Waiting for ESP32 to store firmware ...",
+    failureLabel: forceProgram || !isOffline ? "programming" : "store",
+    successMessage: forceProgram || !isOffline ? "Done. Watch the ESP32 serial log for SWD programming progress." : "Stored for offline programming.",
     topics: {
       target: `${topicPrefix}/target`,
+      algoStart: `${topicPrefix}/algo/start`,
+      algoChunk: `${topicPrefix}/algo/chunk`,
+      algoEnd: `${topicPrefix}/algo/end`,
+      algoAck: `${topicPrefix}/algo/ack`,
       start: `${topicPrefix}/bin/start`,
       chunk: `${topicPrefix}/bin/chunk`,
       end: `${topicPrefix}/bin/end`,
@@ -1558,6 +1812,7 @@ const server = http.createServer(async (req, res) => {
         loadAddr: fields.algoLoadAddr,
         packFlm: fields.packFlm,
         flmName: fields.flmName,
+        packDevice: fields.packDevice,
         target: fields.target
       });
       return send(res, 200, JSON.stringify({
