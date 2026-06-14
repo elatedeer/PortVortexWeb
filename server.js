@@ -1479,7 +1479,7 @@ function buildTransferConfig(mode, params, firmware, algoBlob, topicPrefix, firm
   }
 
   const profile = buildProfile(params, algoBlob);
-  const forceProgram = usesUploadedAlgoBlob(params);
+  const forceProgram = usesUploadedAlgoBlob(params) && !isOffline;
   const startProfile = usesUploadedAlgoBlob(params) ? "" : profile;
   if (firmwareFormat === "hex") {
     const startText = startProfile ? `size=${firmware.data.length};${startProfile}` : `size=${firmware.data.length}`;
