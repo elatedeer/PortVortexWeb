@@ -4,7 +4,9 @@
   "private": true,
   "description": "Web UI for STM32F407 MQTT flashing",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 0.0.0.0",
+    "dev:api": "node server.js",
     "build": "vite build",
     "start": "node server.js"
   },

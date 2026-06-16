@@ -1165,7 +1165,10 @@ async function parseFlmFile() {
 
 async function readJsonResponse(response, fallbackMessage) {
   const text = await response.text();
-  if (!text) return {};
+  if (!text) {
+    if (!response.ok) return { error: `${fallbackMessage}: HTTP ${response.status}` };
+    return {};
+  }
   try {
     return JSON.parse(text);
   } catch (_) {
@@ -1334,8 +1337,9 @@ function clearChannel(key) {
 async function connectChannel(key) {
   const channel = channels[key];
   try {
-    pushChannelLog(channel, lang.value === "zh" ? "正在连接..." : "Connecting...");
-    pushChannelMessage(channel, { status: "connecting", message: lang.value === "zh" ? "正在连接..." : "Connecting..." });
+    const connectingMessage = lang.value === "zh" ? "正在连接..." : "Connecting...";
+    pushChannelLog(channel, connectingMessage);
+    pushChannelMessage(channel, { status: "connecting", message: connectingMessage });
     const response = await fetch("/api/chat/connect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1349,7 +1353,10 @@ async function connectChannel(key) {
       })
     });
     const payload = await readJsonResponse(response, "Chat connect failed");
-    if (!response.ok) throw new Error(payload.error || "Chat connect failed");
+    if (!response.ok) {
+      const detail = payload.error || `Chat connect failed: HTTP ${response.status}`;
+      throw new Error(detail);
+    }
     channel.id = payload.id;
     channel.subscribeTopic = payload.subscribeTopic || channel.subscribeTopic;
     channel.publishTopic = payload.publishTopic || channel.publishTopic;
@@ -1371,8 +1378,11 @@ async function connectChannel(key) {
     };
     channel.events.onerror = () => pushChannelLog(channel, "* stream disconnected");
   } catch (err) {
-    pushChannelLog(channel, `ERROR: ${err.message}`);
-    pushChannelMessage(channel, { status: "error", message: err.message });
+    const message = err.message === "Failed to fetch" || err.message === "Chat connect failed: HTTP 500"
+      ? "Chat connect failed. Check that the backend on port 3000 is running and reachable from the page."
+      : err.message;
+    pushChannelLog(channel, `ERROR: ${message}`);
+    pushChannelMessage(channel, { status: "error", message });
   }
 }
 
@@ -1422,8 +1432,9 @@ async function closeChannel(key) {
   if (channel.events) channel.events.close();
   channel.id = "";
   channel.connected = false;
-  pushChannelLog(channel, lang.value === "zh" ? "已关闭。" : "Closed.");
-  pushChannelMessage(channel, { status: "closed", message: lang.value === "zh" ? "已关闭。" : "Closed." });
+  const closedMessage = lang.value === "zh" ? "已关闭。" : "Closed.";
+  pushChannelLog(channel, closedMessage);
+  pushChannelMessage(channel, { status: "closed", message: closedMessage });
 }
 
 function openHelp() {

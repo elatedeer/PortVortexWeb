@@ -1611,11 +1611,18 @@ async function startChatSession(params) {
   };
   chats.set(id, chat);
 
-  await connectChatClients(chat);
-  chat.status = "connected";
-  pushChat(chat, { type: "status", status: "connected", message: "connected" });
-  listenForChat(chat);
-  return chat;
+  try {
+    await connectChatClients(chat);
+    chat.status = "connected";
+    pushChat(chat, { type: "status", status: "connected", message: "connected" });
+    listenForChat(chat);
+    return chat;
+  } catch (err) {
+    chat.status = "error";
+    disconnectChatClients(chat);
+    chats.delete(id);
+    throw err;
+  }
 }
 
 async function connectChatClients(chat) {
