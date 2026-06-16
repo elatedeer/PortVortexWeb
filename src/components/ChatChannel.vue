@@ -15,11 +15,11 @@
       </div>
       <div class="chat-check-row">
         <label class="chat-check">
-          <Checkbox v-model="channel.showTimestamp" />
+          <CheckboxCompat v-model="channel.showTimestamp" />
           <span>{{ labels.showTimestamp }}</span>
         </label>
         <label class="chat-check">
-          <Checkbox v-model="channel.autoScroll" />
+          <CheckboxCompat v-model="channel.autoScroll" />
           <span>{{ labels.autoScroll || "鑷姩婊氬睆" }}</span>
         </label>
       </div>
@@ -123,7 +123,7 @@
 
     <div class="send-options">
       <label class="chat-check">
-        <Checkbox v-model="channel.timedEnabled" @update:model-value="emitTimerChange" />
+        <CheckboxCompat v-model="channel.timedEnabled" @change="emitTimerChange" />
         <span>{{ labels.timedSend || "瀹氭椂鍙戦€?" }}</span>
       </label>
       <Input
@@ -133,17 +133,12 @@
         min="1"
         @input="emitTimerChange"
       />
-      <Select v-model="channel.timedUnit" @update:model-value="emitTimerChange">
-        <SelectTrigger class="send-option-select">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
+      <select v-model="channel.timedUnit" class="send-option-select" @change="emitTimerChange">
           <SelectItem value="ms">{{ labels.milliseconds || "姣" }}</SelectItem>
           <SelectItem value="s">{{ labels.seconds || "绉?" }}</SelectItem>
-        </SelectContent>
-      </Select>
+      </select>
       <label class="chat-check">
-        <Checkbox v-model="channel.appendEnabled" />
+        <CheckboxCompat v-model="channel.appendEnabled" />
         <span>{{ labels.appendSuffix || "鑷姩鍙戦€侀檮鍔犱綅" }}</span>
       </label>
       <Input
@@ -159,9 +154,9 @@
 import { nextTick, ref, watch } from "vue";
 import { MoreHorizontal, Plus, Trash2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import CheckboxCompat from "./shadcn-compat/ElCheckbox.vue";
+import SelectItem from "./shadcn-compat/ElOption.vue";
 import ElDropdown from "./shadcn-compat/ElDropdown.vue";
 import ElIcon from "./shadcn-compat/ElIcon.vue";
 import { normalizeHexMessage } from "../utils/messageFormat";

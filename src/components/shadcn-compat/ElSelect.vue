@@ -1,11 +1,5 @@
 <script setup>
-import { provide, ref } from "vue";
-import {
-  Select,
-  SelectContent,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
+import { computed } from "vue";
 
 const props = defineProps({
   modelValue: { type: [String, Number], default: "" },
@@ -19,23 +13,26 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["update:modelValue", "change"]);
-const labels = ref({});
-
-provide("elSelectLabels", labels);
-
-function update(value) {
-  emit("update:modelValue", value);
-  emit("change", value);
-}
+const value = computed({
+  get: () => props.modelValue,
+  set: (next) => {
+    emit("update:modelValue", next);
+    emit("change", next);
+  }
+});
 </script>
 
 <template>
-  <Select :model-value="modelValue" :disabled="disabled" @update:model-value="update">
-    <SelectTrigger :class="['w-full', props.class]">
-      <SelectValue :placeholder="placeholder || labels[modelValue] || modelValue" />
-    </SelectTrigger>
-    <SelectContent>
-      <slot />
-    </SelectContent>
-  </Select>
+  <select
+    v-model="value"
+    data-slot="select-trigger"
+    :disabled="disabled"
+    :class="[
+      'h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground shadow-sm outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50',
+      props.class
+    ]"
+  >
+    <option v-if="placeholder" disabled value="">{{ placeholder }}</option>
+    <slot />
+  </select>
 </template>

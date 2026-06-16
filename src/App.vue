@@ -967,7 +967,7 @@ const chatLogItems = computed(() => Object.entries(channels)
 onMounted(async () => {
   try {
     const response = await fetch("/api/meta");
-    const payload = await response.json();
+    const payload = await readJsonResponse(response, "Load metadata failed");
     syncMetaPayload(payload);
     applyTargetConfig(flash.target);
   } catch (_) {
@@ -1110,7 +1110,7 @@ async function importChipConfig() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(config)
     });
-    const payload = await response.json();
+    const payload = await readJsonResponse(response, "Chip config import failed");
     if (!response.ok) throw new Error(payload.error || "chip config import failed");
     syncMetaPayload(payload.meta || {});
     flash.target = payload.config.id;
@@ -1186,8 +1186,8 @@ async function persistChatFormat(key) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ receiveFormat: channel.receiveFormat })
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "format update failed");
+    const payload = await readJsonResponse(response, "Chat format update failed");
+    if (!response.ok) throw new Error(payload.error || "format update failed");
     } catch (err) {
       pushChannelMessage(channel, { status: "error", message: err.message });
       return;
@@ -1346,7 +1346,7 @@ async function connectChannel(key) {
         chatQos: 0
       })
     });
-    const payload = await response.json();
+    const payload = await readJsonResponse(response, "Chat connect failed");
     if (!response.ok) throw new Error(payload.error || "Chat connect failed");
     channel.id = payload.id;
     channel.subscribeTopic = payload.subscribeTopic || channel.subscribeTopic;
