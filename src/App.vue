@@ -1,9 +1,9 @@
 <template>
-  <div :class="['min-h-screen transition-colors', darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-[#f5f7fb] text-slate-900']">
+  <div :class="['theme min-h-screen bg-background text-foreground transition-colors', darkMode ? 'dark' : '']">
     <aside
       :class="[
         'fixed inset-y-0 left-0 z-30 hidden border-r transition-all duration-300 lg:flex lg:flex-col',
-        darkMode ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white',
+        'border-border bg-sidebar text-sidebar-foreground',
         collapsed ? 'w-20' : 'w-64'
       ]"
     >
@@ -11,7 +11,7 @@
         <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-sm font-semibold text-white">PV</div>
         <div v-if="!collapsed" class="min-w-0">
           <div class="truncate text-sm font-semibold">PortVortex</div>
-          <div class="truncate text-xs text-slate-500">{{ t.subtitle }}</div>
+          <div class="truncate text-xs text-muted-foreground">{{ t.subtitle }}</div>
         </div>
       </div>
 
@@ -22,8 +22,8 @@
           class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition"
           :class="[
             currentPage === item.key
-              ? darkMode ? 'bg-white/10 text-white' : 'bg-slate-900 text-white'
-              : darkMode ? 'text-slate-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+              ? 'bg-sidebar-primary text-sidebar-primary-foreground'
+              : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
             collapsed ? 'justify-center' : 'justify-start'
           ]"
           @click="currentPage = item.key"
@@ -35,24 +35,21 @@
 
       <div class="space-y-2 px-3 pb-4">
         <button
-          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition"
-          :class="darkMode ? 'text-slate-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'"
+          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           @click="openHelp"
         >
           <el-icon><QuestionFilled /></el-icon>
           <span v-if="!collapsed">{{ t.helpDocs }}</span>
         </button>
         <button
-          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition"
-          :class="darkMode ? 'text-slate-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'"
+          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           @click="darkMode = !darkMode"
         >
           <el-icon><Moon /></el-icon>
           <span v-if="!collapsed">{{ t.darkMode }}</span>
         </button>
         <button
-          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition"
-          :class="darkMode ? 'text-slate-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'"
+          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           @click="collapsed = !collapsed"
         >
           <el-icon><component :is="collapsed ? Expand : Fold" /></el-icon>
@@ -62,11 +59,11 @@
     </aside>
 
     <main :class="['transition-all duration-300', collapsed ? 'lg:pl-20' : 'lg:pl-64']">
-      <header :class="['sticky top-0 z-20 border-b backdrop-blur-xl', darkMode ? 'border-slate-800 bg-slate-950/80' : 'border-white/70 bg-white/85']">
+      <header class="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-xl">
         <div class="flex min-h-16 items-center justify-between gap-4 px-4 md:px-8">
           <div>
             <h1 class="text-xl font-semibold tracking-tight">{{ pageTitle }}</h1>
-            <p class="mt-0.5 text-xs" :class="darkMode ? 'text-slate-400' : 'text-slate-500'">{{ t.headerHint }}</p>
+            <p class="mt-0.5 text-xs text-muted-foreground">{{ t.headerHint }}</p>
           </div>
           <div class="flex items-center gap-3">
             <el-segmented v-model="lang" :options="languageOptions" />
@@ -514,6 +511,10 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import ChatChannel from "./components/ChatChannel.vue";
+import ElButton from "./components/shadcn-compat/ElButton.vue";
+import ElCard from "./components/shadcn-compat/ElCard.vue";
+import ElProgress from "./components/shadcn-compat/ElProgress.vue";
+import ElTag from "./components/shadcn-compat/ElTag.vue";
 import { DEFAULT_DEVICE_TOKEN, FORMAT_OPTIONS, QUICK_PHRASES } from "./constants";
 import { normalizeHexMessage } from "./utils/messageFormat";
 import { formatChatTime } from "./utils/time";
