@@ -1243,6 +1243,7 @@ async function applyOfflineSettings() {
 
 async function submitFlash() {
   if (!firmwareFile.value) {
+    pushLog(`ERROR: ${t.value.selectFirmware}`);
     ElMessage.error(t.value.selectFirmware);
     return;
   }
@@ -1263,6 +1264,7 @@ async function submitFlash() {
     const response = await fetch("/api/flash", { method: "POST", body: data });
     const payload = await readJsonResponse(response, "Create flash job failed");
     if (!response.ok) throw new Error(payload.error || "Failed to create job");
+    if (!payload.id) throw new Error(payload.error || "Create flash job failed: missing job id");
     const events = new EventSource(`/api/jobs/${payload.id}/events`);
     events.onmessage = (message) => {
       const eventData = JSON.parse(message.data);
