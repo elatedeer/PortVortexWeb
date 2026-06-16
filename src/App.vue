@@ -512,12 +512,22 @@
         </template>
       </div>
     </main>
+    <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2">
+      <div
+        v-for="toast in toasts"
+        :key="toast.id"
+        class="pointer-events-auto rounded-lg border bg-background px-4 py-3 text-sm shadow-lg"
+        :class="toastClasses(toast.type)"
+        role="status"
+      >
+        {{ toast.message }}
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
 import ChatChannel from "./components/ChatChannel.vue";
 import ElAutocomplete from "./components/shadcn-compat/ElAutocomplete.vue";
 import ElButton from "./components/shadcn-compat/ElButton.vue";
@@ -577,7 +587,9 @@ const importingChipConfig = ref(false);
 const parsingFlm = ref(false);
 const offlineSettingsSaving = ref(false);
 const meta = reactive({ firmwareVersion: "v1.0.0", onlineEngineerCount: 1, deviceOnline: false });
+const toasts = ref([]);
 let chatMessageSeq = 0;
+let toastSeq = 0;
 const CHAT_QUICK_PHRASES_STORAGE_PREFIX = "portvortex.chat.quickPhrases.";
 const feedbackForm = reactive({ title: "", type: "bug", contact: "", content: "" });
 
@@ -1049,6 +1061,20 @@ function syncMetaPayload(payload) {
   meta.deviceOnline = Boolean(payload.deviceOnline);
 }
 
+function showToast(message, type = "info") {
+  const id = ++toastSeq;
+  toasts.value.push({ id, message: String(message || ""), type });
+  setTimeout(() => {
+    toasts.value = toasts.value.filter((toast) => toast.id !== id);
+  }, 3200);
+}
+
+function toastClasses(type) {
+  if (type === "success") return "border-emerald-300 text-emerald-800 dark:border-emerald-800 dark:text-emerald-200";
+  if (type === "error") return "border-destructive/50 text-destructive dark:border-destructive";
+  return "border-border text-foreground";
+}
+
 function queryTargets(query, callback) {
   const items = targetOptions.value
     .filter((item) => item.toLowerCase().includes(String(query || "").toLowerCase()))
@@ -1100,7 +1126,7 @@ async function importChipConfig() {
   try {
     config = JSON.parse(extractChipConfigJson(chipConfigInput.value));
   } catch (err) {
-    ElMessage.error(`Invalid JSON: ${err.message}`);
+    showToast(`Invalid JSON: ${err.message}`, "error");
     return;
   }
   importingChipConfig.value = true;
@@ -1116,9 +1142,9 @@ async function importChipConfig() {
     flash.target = payload.config.id;
     applyTargetConfig(payload.config.id);
     chipConfigInput.value = "";
-    ElMessage.success(`Imported ${payload.config.id}`);
+    showToast(`Imported ${payload.config.id}`, "success");
   } catch (err) {
-    ElMessage.error(err.message);
+    showToast(err.message, "error");
   } finally {
     importingChipConfig.value = false;
   }
@@ -1155,9 +1181,9 @@ async function parseFlmFile() {
     applyFlashValues(payload.params || {});
     expert.value = true;
     const name = payload.flashDevice?.name ? ` (${payload.flashDevice.name})` : "";
-    ElMessage.success(`${t.value.flmParsed}${name}`);
+    showToast(`${t.value.flmParsed}${name}`, "success");
   } catch (err) {
-    ElMessage.error(err.message);
+    showToast(err.message, "error");
   } finally {
     parsingFlm.value = false;
   }
@@ -1205,7 +1231,7 @@ async function persistChatFormat(key) {
 }
 
 function submitFeedback() {
-  ElMessage.success(t.value.submitFeedback);
+  showToast(t.value.submitFeedback, "success");
 }
 
 function resetFeedback() {
@@ -1236,9 +1262,9 @@ async function applyOfflineSettings() {
     });
     const payload = await readJsonResponse(response, "Apply offline settings failed");
     if (!response.ok) throw new Error(payload.error || "Apply offline settings failed");
-    ElMessage.success(`${t.value.offlineSettingsSaved} (${payload.channel})`);
+    showToast(`${t.value.offlineSettingsSaved} (${payload.channel})`, "success");
   } catch (err) {
-    ElMessage.error(err.message);
+    showToast(err.message, "error");
   } finally {
     offlineSettingsSaving.value = false;
   }
@@ -1247,7 +1273,7 @@ async function applyOfflineSettings() {
 async function submitFlash() {
   if (!firmwareFile.value) {
     pushLog(`ERROR: ${t.value.selectFirmware}`);
-    ElMessage.error(t.value.selectFirmware);
+    showToast(t.value.selectFirmware, "error");
     return;
   }
   if (flash.storeOnly) flash.singlePacket = false;
@@ -1438,12 +1464,12 @@ async function closeChannel(key) {
 }
 
 function openHelp() {
-  ElMessage.info(t.value.helpDocs);
+  showToast(t.value.helpDocs, "info");
 }
 
 function onUserCommand(command) {
   if (command === "profile") currentPage.value = "profile";
   if (command === "help") openHelp();
-  if (command === "logout") ElMessage.success(t.value.logout);
+  if (command === "logout") showToast(t.value.logout, "success");
 }
 </script>
