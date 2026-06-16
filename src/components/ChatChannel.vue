@@ -4,28 +4,23 @@
       <span :class="channel.connected ? 'status-dot online' : 'status-dot'"></span>
       <div class="min-w-0">
         <div class="text-sm font-medium">{{ channel.connected ? labels.connected : labels.disconnected }}</div>
-        <div class="truncate text-xs text-slate-500">{{ channel.clientId || labels.clientIdAuto }}</div>
+        <div class="truncate text-xs text-muted-foreground">{{ channel.clientId || labels.clientIdAuto }}</div>
       </div>
     </div>
 
     <div class="grid gap-3 md:grid-cols-2">
       <div class="field-block">
         <div class="field-label">{{ labels.clientId }}</div>
-        <input
-          v-model="channel.clientId"
-          class="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-          :disabled="channel.connected"
-          :placeholder="labels.clientIdAuto"
-        >
+        <Input v-model="channel.clientId" :disabled="channel.connected" :placeholder="labels.clientIdAuto" />
       </div>
       <div class="chat-check-row">
         <label class="chat-check">
-          <input v-model="channel.showTimestamp" type="checkbox">
+          <Checkbox v-model="channel.showTimestamp" />
           <span>{{ labels.showTimestamp }}</span>
         </label>
         <label class="chat-check">
-          <input v-model="channel.autoScroll" type="checkbox">
-          <span>{{ labels.autoScroll || "自动滚屏" }}</span>
+          <Checkbox v-model="channel.autoScroll" />
+          <span>{{ labels.autoScroll || "鑷姩婊氬睆" }}</span>
         </label>
       </div>
     </div>
@@ -37,6 +32,7 @@
           <button
             v-for="option in labels.formatOptions"
             :key="option.value"
+            type="button"
             :class="['format-option', channel.sendFormat === option.value ? 'active' : '']"
             @click="changeSendFormat(option.value)"
           >
@@ -50,6 +46,7 @@
           <button
             v-for="option in labels.formatOptions"
             :key="option.value"
+            type="button"
             :class="['format-option', channel.receiveFormat === option.value ? 'active' : '']"
             @click="changeReceiveFormat(option.value)"
           >
@@ -59,16 +56,16 @@
       </div>
     </div>
 
-    <div class="flex gap-2">
-      <button class="el-button el-button--primary" :disabled="channel.connected" @click="$emit('connect')">
+    <div class="flex flex-wrap gap-2">
+      <Button :disabled="channel.connected" @click="$emit('connect')">
         {{ labels.connect }}
-      </button>
-      <button class="el-button" :disabled="!channel.connected" @click="$emit('close')">
+      </Button>
+      <Button variant="outline" :disabled="!channel.connected" @click="$emit('close')">
         {{ labels.close }}
-      </button>
-      <button class="el-button" :disabled="!channel.messages.length && !channel.message" @click="$emit('clear')">
+      </Button>
+      <Button variant="outline" :disabled="!channel.messages.length && !channel.message" @click="$emit('clear')">
         {{ labels.clearContent || labels.clearFeedback || "Clear" }}
-      </button>
+      </Button>
     </div>
 
     <div ref="chatViewRef" class="chat-view">
@@ -84,19 +81,19 @@
           </div>
         </div>
       </template>
-      <div v-else class="text-sm text-slate-500">{{ labels.waiting }}</div>
+      <div v-else class="text-sm text-muted-foreground">{{ labels.waiting }}</div>
     </div>
 
     <div class="message-input-row">
-      <input
+      <Input
         v-model="channel.message"
         class="message-input"
         :placeholder="labels.message"
         @keydown.enter="$emit('send')"
-      >
+      />
       <el-dropdown trigger="click" placement="top-end" :hide-on-click="false" popper-class="quick-menu-popper">
         <button class="quick-menu-button" type="button" :title="labels.quickInsert">
-          <el-icon><MoreFilled /></el-icon>
+          <el-icon><MoreHorizontal /></el-icon>
         </button>
         <template #dropdown>
           <div class="quick-menu">
@@ -108,10 +105,10 @@
               @click="channel.message = phrase"
             >
               <span>{{ phrase }}</span>
-              <el-icon class="quick-delete" @click.stop="removePhrase(phrase)"><Delete /></el-icon>
+              <el-icon class="quick-delete" @click.stop="removePhrase(phrase)"><Trash2 /></el-icon>
             </button>
             <div class="quick-add-row">
-              <input v-model="channel.newPhrase" class="quick-add-input" :placeholder="labels.quickInsert" @keydown.enter.stop="addPhrase">
+              <Input v-model="channel.newPhrase" class="quick-add-input" :placeholder="labels.quickInsert" @keydown.enter.stop="addPhrase" />
               <button class="quick-add-button" type="button" :title="labels.addPhrase || labels.quickInsert" @click="addPhrase">
                 <el-icon><Plus /></el-icon>
               </button>
@@ -119,43 +116,54 @@
           </div>
         </template>
       </el-dropdown>
-      <button class="el-button el-button--primary" :disabled="!channel.connected" @click="$emit('send')">
+      <Button :disabled="!channel.connected" @click="$emit('send')">
         {{ labels.send }}
-      </button>
+      </Button>
     </div>
 
     <div class="send-options">
       <label class="chat-check">
-        <input v-model="channel.timedEnabled" type="checkbox" @change="emitTimerChange">
-        <span>{{ labels.timedSend || "定时发送" }}</span>
+        <Checkbox v-model="channel.timedEnabled" @update:model-value="emitTimerChange" />
+        <span>{{ labels.timedSend || "瀹氭椂鍙戦€?" }}</span>
       </label>
-      <input
+      <Input
         v-model.number="channel.timedValue"
         class="send-option-input"
         type="number"
         min="1"
         @input="emitTimerChange"
-      >
-      <select v-model="channel.timedUnit" class="send-option-select" @change="emitTimerChange">
-        <option value="ms">{{ labels.milliseconds || "毫秒" }}</option>
-        <option value="s">{{ labels.seconds || "秒" }}</option>
-      </select>
+      />
+      <Select v-model="channel.timedUnit" @update:model-value="emitTimerChange">
+        <SelectTrigger class="send-option-select">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="ms">{{ labels.milliseconds || "姣" }}</SelectItem>
+          <SelectItem value="s">{{ labels.seconds || "绉?" }}</SelectItem>
+        </SelectContent>
+      </Select>
       <label class="chat-check">
-        <input v-model="channel.appendEnabled" type="checkbox">
-        <span>{{ labels.appendSuffix || "自动发送附加位" }}</span>
+        <Checkbox v-model="channel.appendEnabled" />
+        <span>{{ labels.appendSuffix || "鑷姩鍙戦€侀檮鍔犱綅" }}</span>
       </label>
-      <input
+      <Input
         v-model="channel.appendValue"
         class="send-option-input append-input"
-        :placeholder="labels.appendValue || '附加位'"
-      >
+        :placeholder="labels.appendValue || '闄勫姞浣?'"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
 import { nextTick, ref, watch } from "vue";
-import { Delete, MoreFilled, Plus } from "@element-plus/icons-vue";
+import { MoreHorizontal, Plus, Trash2 } from "@lucide/vue";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import ElDropdown from "./shadcn-compat/ElDropdown.vue";
+import ElIcon from "./shadcn-compat/ElIcon.vue";
 import { normalizeHexMessage } from "../utils/messageFormat";
 
 const props = defineProps({
