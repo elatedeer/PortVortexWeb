@@ -19,6 +19,8 @@
         <button
           v-for="item in sideNav"
           :key="item.key"
+          :title="collapsed ? item.label : undefined"
+          :aria-label="item.label"
           class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition"
           :class="[
             currentPage === item.key
@@ -35,6 +37,8 @@
 
       <div class="space-y-2 px-3 pb-4">
         <button
+          :title="collapsed ? t.helpDocs : undefined"
+          :aria-label="t.helpDocs"
           class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           @click="openHelp"
         >
@@ -42,6 +46,8 @@
           <span v-if="!collapsed">{{ t.helpDocs }}</span>
         </button>
         <button
+          :title="collapsed ? t.darkMode : undefined"
+          :aria-label="t.darkMode"
           class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           @click="darkMode = !darkMode"
         >
@@ -49,6 +55,8 @@
           <span v-if="!collapsed">{{ t.darkMode }}</span>
         </button>
         <button
+          :title="collapsed ? t.collapse : undefined"
+          :aria-label="t.collapse"
           class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           @click="collapsed = !collapsed"
         >
