@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { nextTick, onBeforeUnmount, ref } from "vue";
 import { Input } from "@/components/ui/input";
 
 const props = defineProps({
@@ -16,8 +16,34 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["update:modelValue", "select", "blur", "change"]);
+const rootRef = ref(null);
 const open = ref(false);
 const suggestions = ref([]);
+const dropdownStyle = ref({});
+
+function updateDropdownPosition() {
+  const root = rootRef.value;
+  if (!root) return;
+  const rect = root.getBoundingClientRect();
+  dropdownStyle.value = {
+    position: "fixed",
+    left: `${rect.left}px`,
+    top: `${rect.bottom + 4}px`,
+    width: `${rect.width}px`
+  };
+}
+
+function setOpen(next) {
+  open.value = next;
+  if (next) {
+    nextTick(updateDropdownPosition);
+    window.addEventListener("resize", updateDropdownPosition);
+    window.addEventListener("scroll", updateDropdownPosition, true);
+  } else {
+    window.removeEventListener("resize", updateDropdownPosition);
+    window.removeEventListener("scroll", updateDropdownPosition, true);
+  }
+}
 
 function loadSuggestions(query = props.modelValue) {
   if (typeof props.fetchSuggestions !== "function") {
@@ -27,13 +53,13 @@ function loadSuggestions(query = props.modelValue) {
   }
   props.fetchSuggestions(query, (items) => {
     suggestions.value = Array.isArray(items) ? items : [];
-    open.value = suggestions.value.length > 0;
+    setOpen(suggestions.value.length > 0);
   });
 }
 
 function updateValue(next) {
   emit("update:modelValue", next);
-  if (open.value || String(next || "")) loadSuggestions(next);
+  loadSuggestions(next);
 }
 
 function selectItem(item) {
@@ -41,14 +67,14 @@ function selectItem(item) {
   emit("update:modelValue", next);
   emit("select", { ...item, value: next });
   emit("change", next);
-  open.value = false;
+  setOpen(false);
 }
 
 function clearValue() {
   emit("update:modelValue", "");
   emit("change", "");
   suggestions.value = [];
-  open.value = false;
+  setOpen(false);
 }
 
 function onFocus() {
@@ -58,17 +84,21 @@ function onFocus() {
 function onBlur(event) {
   emit("blur", event);
   window.setTimeout(() => {
-    open.value = false;
-  }, 120);
+    setOpen(false);
+  }, 180);
 }
 
 function onChange() {
   emit("change", props.modelValue);
 }
+
+onBeforeUnmount(() => {
+  setOpen(false);
+});
 </script>
 
 <template>
-  <div class="relative w-full">
+  <div ref="rootRef" class="relative w-full">
     <div class="flex w-full">
       <Input
         :model-value="modelValue"
@@ -93,20 +123,23 @@ function onChange() {
         x
       </button>
     </div>
-    <div
-      v-if="open"
-      class="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-border bg-popover p-1 text-sm shadow-lg"
-    >
-      <button
-        v-for="item in suggestions"
-        :key="item.value"
-        class="block w-full rounded-md px-2 py-1.5 text-left font-mono hover:bg-accent"
-        type="button"
-        @mousedown.prevent
-        @click="selectItem(item)"
+    <Teleport to="body">
+      <div
+        v-if="open"
+        class="z-[9999] max-h-56 overflow-auto rounded-lg border border-border bg-popover p-1 text-sm shadow-lg"
+        :style="dropdownStyle"
       >
-        {{ item.value }}
-      </button>
-    </div>
+        <button
+          v-for="item in suggestions"
+          :key="item.value"
+          class="block w-full rounded-md px-2 py-1.5 text-left font-mono hover:bg-accent"
+          type="button"
+          @mousedown.prevent
+          @click="selectItem(item)"
+        >
+          {{ item.value }}
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>

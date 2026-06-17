@@ -202,6 +202,40 @@ select {
   padding: 12px;
 }
 
+.chat-page .control-card .el-card__header {
+  padding: 14px 16px;
+}
+
+.chat-page .control-card .el-card__body {
+  padding: 16px;
+}
+
+.chat-page .chat-token-card .el-card__body {
+  padding-block: 14px;
+}
+
+.chat-page .chat-view {
+  min-height: 160px;
+  max-height: 240px;
+  gap: 6px;
+  padding: 10px;
+}
+
+.chat-page .channel-summary {
+  gap: 10px;
+  padding: 10px;
+}
+
+.chat-page .send-options {
+  gap: 6px 8px;
+  padding: 8px;
+}
+
+.chat-page .file-input {
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
 .chat-check-row {
   display: flex;
   flex-wrap: wrap;

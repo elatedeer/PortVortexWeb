@@ -330,8 +330,8 @@
         </template>
 
         <template v-else-if="currentPage === 'chat'">
-          <section class="space-y-5">
-            <el-card class="control-card" shadow="never">
+          <section class="chat-page space-y-4">
+            <el-card class="control-card chat-token-card" shadow="never">
               <template #header>
                 <div class="flex items-center justify-between">
                   <div>
@@ -341,7 +341,7 @@
                   <el-tag :type="deviceOnline ? 'success' : 'info'" effect="light">{{ onlineBadgeText }}</el-tag>
                 </div>
               </template>
-              <div class="field-block mb-4">
+              <div class="field-block">
                 <div class="field-label">{{ t.deviceToken }}</div>
                 <el-autocomplete
                   v-model="chatDeviceToken"
@@ -361,7 +361,7 @@
                 </el-autocomplete>
               </div>
             </el-card>
-            <section class="grid gap-5 xl:grid-cols-2">
+            <section class="grid gap-4 xl:grid-cols-2">
               <el-card class="control-card" shadow="never">
                 <template #header>
                   <div class="flex items-center justify-between gap-3">
@@ -800,6 +800,9 @@ const meta = reactive({ firmwareVersion: "v1.0.0", onlineEngineerCount: 1, devic
 const toasts = ref([]);
 let chatMessageSeq = 0;
 let toastSeq = 0;
+let timedWorker = null;
+let timedWakeLock = null;
+const timedInFlight = new Set();
 const CHAT_QUICK_PHRASES_STORAGE_PREFIX = "portvortex.chat.quickPhrases.";
 const feedbackForm = reactive({ title: "", type: "bug", contact: "", content: "" });
 const serialRaw = reactive({ uart1: "", rs485: "", can: "" });
@@ -1121,6 +1124,11 @@ Object.assign(copy.zh, {
   createGroup: "新建分组",
   groupDevices: "设备归组",
   devices: "设备",
+  device: "设备",
+  importByToken: "按 Token 导入设备",
+  tokenImportPlaceholder: "每行一个设备 Token，也可以粘贴 /topic/productid... 或 productid...",
+  exportExcel: "导出 Excel",
+  importExcel: "导入 Excel",
   sendFile: "发送文件",
   fileSizeLimit: "最大64KB",
   fileTooLarge: "文件过大，最大64KB"
@@ -1133,6 +1141,11 @@ Object.assign(copy.en, {
   createGroup: "Create group",
   groupDevices: "Group Devices",
   devices: "devices",
+  device: "Device",
+  importByToken: "Import devices by token",
+  tokenImportPlaceholder: "One device token per line. /topic/productid... and productid... are also supported.",
+  exportExcel: "Export Excel",
+  importExcel: "Import Excel",
   sendFile: "Send File",
   fileSizeLimit: "Max 64KB",
   fileTooLarge: "File too large. Max 64KB."
@@ -1286,6 +1299,9 @@ const chatLogItems = computed(() => Object.entries(channels)
   .sort((a, b) => a.id.localeCompare(b.id)));
 
 onMounted(async () => {
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", handleTimedVisibilityChange);
+  }
   try {
     const response = await fetch("/api/meta");
     const payload = await readJsonResponse(response, "Load metadata failed");
@@ -1301,6 +1317,15 @@ onBeforeUnmount(() => {
   Object.values(channels).forEach((channel) => {
     if (channel.timedTimer) clearInterval(channel.timedTimer);
   });
+  if (timedWorker) {
+    timedWorker.postMessage({ type: "stopAll" });
+    timedWorker.terminate();
+    timedWorker = null;
+  }
+  releaseTimedWakeLock();
+  if (typeof document !== "undefined") {
+    document.removeEventListener("visibilitychange", handleTimedVisibilityChange);
+  }
 });
 
 function loadQuickPhrases(key) {
@@ -1890,6 +1915,72 @@ async function sendChannelFile(key) {
   await sendChannel(key);
 }
 
+function getTimedWorker() {
+  if (timedWorker) return timedWorker;
+  if (typeof Worker === "undefined") return null;
+  try {
+    timedWorker = new Worker(new URL("./workers/timedSendWorker.js", import.meta.url), { type: "module" });
+    timedWorker.onmessage = (event) => {
+      if (event.data?.type !== "tick") return;
+      const key = event.data.key;
+      const channel = channels[key];
+      if (!channel?.connected || !channel.message || timedInFlight.has(key)) return;
+      timedInFlight.add(key);
+      Promise.resolve(sendChannel(key)).finally(() => timedInFlight.delete(key));
+    };
+    return timedWorker;
+  } catch (_) {
+    timedWorker = null;
+    return null;
+  }
+}
+
+function startWorkerTimer(key, intervalMs) {
+  const worker = getTimedWorker();
+  if (!worker) return false;
+  worker.postMessage({ type: "start", key, intervalMs });
+  return true;
+}
+
+function stopWorkerTimer(key) {
+  if (timedWorker) timedWorker.postMessage({ type: "stop", key });
+}
+
+function hasActiveTimedSend() {
+  return Object.values(channels).some((channel) => channel.timedEnabled);
+}
+
+async function requestTimedWakeLock() {
+  if (timedWakeLock || typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
+  if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+  try {
+    timedWakeLock = await navigator.wakeLock.request("screen");
+    timedWakeLock.addEventListener("release", () => {
+      timedWakeLock = null;
+    });
+  } catch (_) {
+    timedWakeLock = null;
+  }
+}
+
+function releaseTimedWakeLock() {
+  if (!timedWakeLock) return;
+  const lock = timedWakeLock;
+  timedWakeLock = null;
+  lock.release().catch(() => {});
+}
+
+function syncTimedWakeLock() {
+  if (hasActiveTimedSend()) requestTimedWakeLock();
+  else releaseTimedWakeLock();
+}
+
+function handleTimedVisibilityChange() {
+  if (typeof document !== "undefined" && document.visibilityState === "visible" && hasActiveTimedSend()) {
+    requestTimedWakeLock();
+  }
+}
+
 function timedIntervalMs(channel) {
   const value = Math.max(1, Number(channel.timedValue) || 1);
   return channel.timedUnit === "s" ? value * 1000 : value;
@@ -1901,10 +1992,18 @@ function syncTimedSend(key) {
     clearInterval(channel.timedTimer);
     channel.timedTimer = null;
   }
-  if (!channel.timedEnabled) return;
-  channel.timedTimer = setInterval(() => {
-    if (channel.connected && channel.message) sendChannel(key);
-  }, timedIntervalMs(channel));
+  stopWorkerTimer(key);
+  if (!channel.timedEnabled) {
+    syncTimedWakeLock();
+    return;
+  }
+  const intervalMs = timedIntervalMs(channel);
+  if (!startWorkerTimer(key, intervalMs)) {
+    channel.timedTimer = setInterval(() => {
+      if (channel.connected && channel.message) sendChannel(key);
+    }, intervalMs);
+  }
+  syncTimedWakeLock();
 }
 
 async function closeChannel(key) {

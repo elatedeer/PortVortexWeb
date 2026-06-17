@@ -1,0 +1,1 @@
+(function(){"use strict";const t=new Map;function n(s){const e=t.get(s);e&&clearInterval(e),t.delete(s)}self.onmessage=s=>{const e=s.data||{};if(e.type==="start"){n(e.key);const o=Math.max(1,Number(e.intervalMs)||1),a=setInterval(()=>{self.postMessage({type:"tick",key:e.key})},o);t.set(e.key,a)}if(e.type==="stop"&&n(e.key),e.type==="stopAll")for(const o of t.keys())n(o)}})();
