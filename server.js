@@ -216,13 +216,21 @@ class MqttClient {
     this.incoming = [];
     this.pendingPackets = [];
     this.packetWaiters = [];
+    this.keepAliveSeconds = Number(process.env.MQTT_KEEPALIVE_SECONDS || 10);
+    this.keepAliveTimer = null;
   }
 
   async connect() {
     this.socket = net.createConnection({ host: this.host, port: this.port });
     this.socket.on("data", (chunk) => this._onData(chunk));
-    this.socket.on("error", (err) => this._failWaiters(err));
-    this.socket.on("close", () => this._failWaiters(new Error("MQTT connection closed")));
+    this.socket.on("error", (err) => {
+      this._stopKeepAlive();
+      this._failWaiters(err);
+    });
+    this.socket.on("close", () => {
+      this._stopKeepAlive();
+      this._failWaiters(new Error("MQTT connection closed"));
+    });
 
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("MQTT connect timeout")), this.timeoutMs);
@@ -244,12 +252,14 @@ class MqttClient {
       payload = Buffer.concat([payload, mqttString(this.password)]);
     }
 
-    const header = Buffer.concat([mqttString("MQTT"), Buffer.from([4, flags, 0, 60])]);
+    const keepAlive = Math.max(1, Math.min(0xffff, Number(this.keepAliveSeconds) || 60));
+    const header = Buffer.concat([mqttString("MQTT"), Buffer.from([4, flags, (keepAlive >> 8) & 0xff, keepAlive & 0xff])]);
     this._sendPacket(0x10, Buffer.concat([header, payload]));
     const [packetType, body] = await this._readPacket();
     if (packetType !== 0x20 || !body.equals(Buffer.from([0, 0]))) {
       throw new Error(`MQTT connect failed: 0x${packetType.toString(16)} ${body.toString("hex")}`);
     }
+    this._startKeepAlive();
   }
 
   async subscribe(topic, qos = 0) {
@@ -315,6 +325,7 @@ class MqttClient {
   }
 
   disconnect() {
+    this._stopKeepAlive();
     if (!this.socket) return;
     try {
       this._sendPacket(0xe0, Buffer.alloc(0));
@@ -323,6 +334,27 @@ class MqttClient {
       this.socket.destroy();
     }
     this.socket = null;
+  }
+
+  _startKeepAlive() {
+    this._stopKeepAlive();
+    const intervalMs = Math.max(1000, Math.floor((this.keepAliveSeconds * 1000) / 2));
+    this.keepAliveTimer = setInterval(() => {
+      if (!this.socket || this.socket.destroyed) return;
+      try {
+        this._sendPacket(0xc0, Buffer.alloc(0));
+      } catch (err) {
+        this._stopKeepAlive();
+        this._failWaiters(err);
+      }
+    }, intervalMs);
+    this.keepAliveTimer.unref?.();
+  }
+
+  _stopKeepAlive() {
+    if (!this.keepAliveTimer) return;
+    clearInterval(this.keepAliveTimer);
+    this.keepAliveTimer = null;
   }
 
   _sendPacket(type, body) {
