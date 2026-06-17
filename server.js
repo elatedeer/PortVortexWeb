@@ -18,7 +18,7 @@ const DEFAULTS = {
   port: 21882,
   mqttUsername: "admin",
   mqttPassword: "gsx_20260521",
-  deviceToken: "6bf3418a09725d07",
+  deviceToken: "",
   target: "stm32f4",
   baseAddr: "0x08000000",
   chunkSize: 2048,
@@ -943,7 +943,10 @@ function replaceProfileToken(profile, key, value) {
 }
 
 function normalizeDeviceToken(value) {
-  const text = String(value || DEFAULTS.deviceToken).trim();
+  const text = String(value || "").trim();
+  if (!text) {
+    throw new Error("device token is required");
+  }
   const match = text.match(/productid([A-Za-z0-9_-]+)$/);
   const token = match ? match[1] : text.replace(/^\/topic\/productid/, "");
   if (!/^[A-Za-z0-9_-]+$/.test(token)) {

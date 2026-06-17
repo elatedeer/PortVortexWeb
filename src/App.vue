@@ -140,13 +140,21 @@
                   </div>
                   <div class="field-block">
                     <div class="field-label">{{ t.deviceToken }}</div>
-                    <el-input v-model="flash.deviceToken" placeholder="6bf3418a09725d07">
+                    <el-autocomplete
+                      v-model="flash.deviceToken"
+                      :fetch-suggestions="queryDeviceTokens"
+                      clearable
+                      :placeholder="t.deviceToken"
+                      @blur="saveDeviceTokenHistory(flash.deviceToken, 'download')"
+                      @change="saveDeviceTokenHistory(flash.deviceToken, 'download')"
+                      @select="onDeviceTokenSelect"
+                    >
                       <template #append>
                         <el-tooltip :content="t.deviceTokenHelp" placement="top" effect="light">
                           <button class="token-help-button" type="button" aria-label="Device token help">?</button>
                         </el-tooltip>
                       </template>
-                    </el-input>
+                    </el-autocomplete>
                   </div>
                   <div class="field-block lg:col-span-2">
                     <div class="field-label">{{ t.firmware }}</div>
@@ -335,13 +343,22 @@
               </template>
               <div class="field-block mb-4">
                 <div class="field-label">{{ t.deviceToken }}</div>
-                <el-input v-model="chatDeviceToken" :disabled="anyChannelConnected" placeholder="6bf3418a09725d07">
+                <el-autocomplete
+                  v-model="chatDeviceToken"
+                  :fetch-suggestions="queryDeviceTokens"
+                  :disabled="anyChannelConnected"
+                  clearable
+                  :placeholder="t.deviceToken"
+                  @blur="saveDeviceTokenHistory(chatDeviceToken, 'chat')"
+                  @change="saveDeviceTokenHistory(chatDeviceToken, 'chat')"
+                  @select="onDeviceTokenSelect"
+                >
                   <template #append>
                     <el-tooltip :content="t.deviceTokenHelp" placement="top" effect="light">
                       <button class="token-help-button" type="button" aria-label="Device token help">?</button>
                     </el-tooltip>
                   </template>
-                </el-input>
+                </el-autocomplete>
               </div>
             </el-card>
             <section class="grid gap-5 xl:grid-cols-2">
@@ -381,13 +398,22 @@
               </template>
               <div class="field-block">
                 <div class="field-label">{{ t.deviceToken }}</div>
-                <el-input v-model="chatDeviceToken" :disabled="anyChannelConnected" placeholder="6bf3418a09725d07">
+                <el-autocomplete
+                  v-model="chatDeviceToken"
+                  :fetch-suggestions="queryDeviceTokens"
+                  :disabled="anyChannelConnected"
+                  clearable
+                  :placeholder="t.deviceToken"
+                  @blur="saveDeviceTokenHistory(chatDeviceToken, 'can')"
+                  @change="saveDeviceTokenHistory(chatDeviceToken, 'can')"
+                  @select="onDeviceTokenSelect"
+                >
                   <template #append>
                     <el-tooltip :content="t.deviceTokenHelp" placement="top" effect="light">
                       <button class="token-help-button" type="button" aria-label="Device token help">?</button>
                     </el-tooltip>
                   </template>
-                </el-input>
+                </el-autocomplete>
               </div>
             </el-card>
             <el-card class="control-card" shadow="never">
@@ -409,40 +435,18 @@
         </template>
 
         <template v-else-if="currentPage === 'groups'">
-          <section class="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-            <el-card class="control-card" shadow="never">
-              <template #header><span class="text-base font-semibold">{{ t.deviceGroups }}</span></template>
-              <div class="space-y-3">
-                <button
-                  v-for="group in deviceGroups"
-                  :key="group.id"
-                  type="button"
-                  :class="['group-item', selectedGroupId === group.id ? 'active' : '']"
-                  @click="selectedGroupId = group.id"
-                >
-                  <span class="font-medium">{{ group.name }}</span>
-                  <span class="text-xs text-muted-foreground">{{ devicesInGroup(group.id).length }} {{ t.devices }}</span>
-                </button>
-                <div class="space-y-2 border-t border-border pt-3">
-                  <el-input v-model="newGroupName" :placeholder="t.newGroupName" />
-                  <el-button type="primary" @click="createGroup">{{ t.createGroup }}</el-button>
-                </div>
-              </div>
-            </el-card>
-            <el-card class="control-card" shadow="never">
-              <template #header><span class="text-base font-semibold">{{ t.groupDevices }}</span></template>
-              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                <div v-for="device in devicesInGroup(selectedGroupId)" :key="device.id" class="device-card">
-                  <div class="font-medium">{{ device.name }}</div>
-                  <div class="mt-1 text-xs text-muted-foreground">{{ device.type }}</div>
-                  <el-select v-model="device.groupId" class="mt-3">
-                    <el-option v-for="group in deviceGroups" :key="group.id" :label="group.name" :value="group.id" />
-                  </el-select>
-                </div>
-                <div v-if="!devicesInGroup(selectedGroupId).length" class="text-sm text-muted-foreground">{{ t.waiting }}</div>
-              </div>
-            </el-card>
-          </section>
+          <device-groups-page :labels="t" />
+        </template>
+
+        <template v-else-if="currentPage === 'tokenHistory'">
+          <token-history-page
+            :history="deviceTokenHistory"
+            :labels="t"
+            :lang="lang"
+            @apply="applyTokenHistory"
+            @remove="removeDeviceTokenHistory"
+            @clear="clearDeviceTokenHistory"
+          />
         </template>
 
         <template v-else-if="currentPage === 'feedback'">
@@ -728,6 +732,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import ChatChannel from "./components/ChatChannel.vue";
+import { useDeviceTokenHistory } from "./composables/useDeviceTokenHistory";
+import DeviceGroupsPage from "./pages/DeviceGroupsPage.vue";
+import TokenHistoryPage from "./pages/TokenHistoryPage.vue";
 import ElAutocomplete from "./components/shadcn-compat/ElAutocomplete.vue";
 import ElButton from "./components/shadcn-compat/ElButton.vue";
 import ElCard from "./components/shadcn-compat/ElCard.vue";
@@ -804,20 +811,18 @@ const serialForms = reactive({
 const baudRateOptions = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 1500000, 2000000];
 const canBitrateOptions = [50000, 100000, 125000, 250000, 500000, 800000, 1000000];
 const canConfig = reactive({ bitrate: 500000 });
-const deviceGroups = ref([
-  { id: "default", name: "Default" }
-]);
-const selectedGroupId = ref("default");
-const newGroupName = ref("");
-const groupDevices = ref([
-  { id: "dev-1", name: "Device A", type: "UART1", groupId: "default" },
-  { id: "dev-2", name: "Device B", type: "RS485", groupId: "default" },
-  { id: "dev-3", name: "Device C", type: "CAN", groupId: "default" }
-]);
 const serialPorts = [
   { key: "uart1", label: "UART1", kind: "serial" },
   { key: "rs485", label: "RS485", kind: "serial" }
 ];
+const {
+  deviceTokenHistory,
+  saveDeviceTokenHistory,
+  queryDeviceTokens,
+  onDeviceTokenSelect,
+  removeDeviceTokenHistory,
+  clearDeviceTokenHistory
+} = useDeviceTokenHistory();
 
 const user = reactive({
   name: "陈工",
@@ -1133,12 +1138,37 @@ Object.assign(copy.en, {
   fileTooLarge: "File too large. Max 64KB."
 });
 
+Object.assign(copy.zh, {
+  tokenHistory: "Token 历史",
+  tokenHistoryHint: "读取本机保存过的设备 Token 连接记录，可一键应用到下载和实时通信。",
+  noTokenHistory: "暂无 Token 历史记录",
+  lastUsed: "最后使用",
+  usedCount: "使用次数",
+  source: "来源",
+  useToken: "使用",
+  delete: "删除",
+  clear: "清空"
+});
+
+Object.assign(copy.en, {
+  tokenHistory: "Token History",
+  tokenHistoryHint: "Read saved device token connection records on this browser and apply them quickly.",
+  noTokenHistory: "No token history yet",
+  lastUsed: "Last used",
+  usedCount: "Use count",
+  source: "Source",
+  useToken: "Use",
+  delete: "Delete",
+  clear: "Clear"
+});
+
 const t = computed(() => copy[lang.value]);
 const pageTitle = computed(() => {
   if (currentPage.value === "profile") return t.value.profile;
   if (currentPage.value === "chat") return t.value.chat;
   if (currentPage.value === "can") return t.value.canChat;
   if (currentPage.value === "groups") return t.value.deviceGroups;
+  if (currentPage.value === "tokenHistory") return t.value.tokenHistory;
   if (currentPage.value === "feedback") return t.value.feedback;
   if (currentPage.value === "logs") return t.value.logs;
   return t.value.title;
@@ -1222,6 +1252,7 @@ const sideNav = computed(() => [
   { key: "download", label: t.value.downloadSetup, icon: Download },
   { key: "chat", label: t.value.chat, icon: ChatDotRound },
   { key: "groups", label: t.value.deviceGroups, icon: House },
+  { key: "tokenHistory", label: t.value.tokenHistory, icon: Document },
   { key: "can", label: t.value.canChat, icon: Connection },
   { key: "feedback", label: t.value.feedback, icon: Promotion },
   { key: "logs", label: t.value.logs, icon: Document },
@@ -1292,6 +1323,16 @@ function saveQuickPhrases(key, phrases) {
   window.localStorage.setItem(`${CHAT_QUICK_PHRASES_STORAGE_PREFIX}${key}`, JSON.stringify(cleaned));
 }
 
+function applyTokenHistory(token) {
+  const next = String(token || "").trim();
+  if (!next) return;
+  flash.deviceToken = next;
+  chatDeviceToken.value = next;
+  saveDeviceTokenHistory(next, "history");
+  syncChatTopics();
+  showToast(lang.value === "zh" ? "已应用 Token" : "Token applied", "success");
+}
+
 function createChannelState(key, subscribeTopic, publishTopic, target) {
   return reactive({
     id: "",
@@ -1321,7 +1362,7 @@ function createChannelState(key, subscribeTopic, publishTopic, target) {
 }
 
 function syncChatTopics() {
-  const token = String(chatDeviceToken.value || "").trim() || DEFAULT_DEVICE_TOKEN;
+  const token = String(chatDeviceToken.value || "").trim();
   channels.general.subscribeTopic = `/topic/productid${token}/qos1`;
   channels.general.publishTopic = `/topic/productid${token}/qos0`;
   channels.rs485.subscribeTopic = `/topic/productid${token}/rs485/qos1`;
@@ -1626,7 +1667,14 @@ function appendFormValue(data, key, value) {
   else data.set(key, String(value));
 }
 
+function requireDeviceToken(token) {
+  if (String(token || "").trim()) return true;
+  showToast(lang.value === "zh" ? "请输入设备 Token" : "Device token is required", "error");
+  return false;
+}
+
 async function applyOfflineSettings() {
+  if (!requireDeviceToken(flash.deviceToken)) return;
   offlineSettingsSaving.value = true;
   try {
     const response = await fetch("/api/offline/settings", {
@@ -1655,7 +1703,9 @@ async function submitFlash() {
     showToast(t.value.selectFirmware, "error");
     return;
   }
+  if (!requireDeviceToken(flash.deviceToken)) return;
   if (flash.storeOnly) flash.singlePacket = false;
+  saveDeviceTokenHistory(flash.deviceToken, "download");
   flashing.value = true;
   progress.value = 0;
   logs.value = [];
@@ -1741,7 +1791,9 @@ function clearChannel(key) {
 
 async function connectChannel(key) {
   const channel = channels[key];
+  if (!requireDeviceToken(chatDeviceToken.value)) return;
   try {
+    saveDeviceTokenHistory(chatDeviceToken.value, key === "can" ? "can" : "chat");
     const connectingMessage = lang.value === "zh" ? "正在连接..." : "Connecting...";
     pushChannelLog(channel, connectingMessage);
     pushChannelMessage(channel, { status: "connecting", message: connectingMessage });
@@ -1836,19 +1888,6 @@ async function sendChannelFile(key) {
     channel.message = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
   }
   await sendChannel(key);
-}
-
-function devicesInGroup(groupId) {
-  return groupDevices.value.filter((device) => device.groupId === groupId);
-}
-
-function createGroup() {
-  const name = String(newGroupName.value || "").trim();
-  if (!name) return;
-  const id = `group-${Date.now()}`;
-  deviceGroups.value.push({ id, name });
-  selectedGroupId.value = id;
-  newGroupName.value = "";
 }
 
 function timedIntervalMs(channel) {
