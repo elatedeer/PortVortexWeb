@@ -346,12 +346,22 @@
             </el-card>
             <section class="grid gap-5 xl:grid-cols-2">
               <el-card class="control-card" shadow="never">
-                <template #header><span class="text-base font-semibold">{{ t.generalChat }}</span></template>
-              <chat-channel :channel="channels.general" :labels="t" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @file-send="sendChannelFile('general')" @clear="clearChannel('general')" @format-change="persistChatFormat('general')" @timer-change="syncTimedSend('general')" />
+                <template #header>
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="text-base font-semibold">{{ t.generalChat }}</span>
+                    <el-button :loading="serialLoading === 'uart1'" @click="openSerialConfig('uart1')">{{ t.serialConfig }}</el-button>
+                  </div>
+                </template>
+                <chat-channel :channel="channels.general" :labels="t" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @file-send="sendChannelFile('general')" @clear="clearChannel('general')" @format-change="persistChatFormat('general')" @timer-change="syncTimedSend('general')" />
               </el-card>
               <el-card class="control-card" shadow="never">
-                <template #header><span class="text-base font-semibold">{{ t.rs485Chat }}</span></template>
-              <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @file-send="sendChannelFile('rs485')" @clear="clearChannel('rs485')" @format-change="persistChatFormat('rs485')" @timer-change="syncTimedSend('rs485')" />
+                <template #header>
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="text-base font-semibold">{{ t.rs485Chat }}</span>
+                    <el-button :loading="serialLoading === 'rs485'" @click="openSerialConfig('rs485')">{{ t.serialConfig }}</el-button>
+                  </div>
+                </template>
+                <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @file-send="sendChannelFile('rs485')" @clear="clearChannel('rs485')" @format-change="persistChatFormat('rs485')" @timer-change="syncTimedSend('rs485')" />
               </el-card>
             </section>
           </section>
@@ -378,9 +388,6 @@
                     </el-tooltip>
                   </template>
                 </el-input>
-              </div>
-              <div class="flex justify-end">
-                <el-button :loading="serialLoading" @click="openSerialConfig">{{ t.serialConfig }}</el-button>
               </div>
             </el-card>
             <el-card class="control-card" shadow="never">
@@ -584,68 +591,123 @@
         </template>
       </div>
     </main>
-    <div v-if="serialDialogVisible" class="modal-backdrop" @click.self="serialDialogVisible = false">
+    <div v-if="serialDialogVisible.uart1" class="modal-backdrop" @click.self="serialDialogVisible.uart1 = false">
       <div class="serial-dialog">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <div class="text-lg font-semibold">{{ t.serialConfig }}</div>
+            <div class="text-lg font-semibold">{{ t.serialConfig }} - UART1</div>
             <div class="mt-1 text-xs text-muted-foreground">{{ t.serialConfigHint }}</div>
           </div>
-          <button class="quick-menu-button" type="button" :title="t.close" @click="serialDialogVisible = false">x</button>
+          <button class="quick-menu-button" type="button" :title="t.close" @click="serialDialogVisible.uart1 = false">x</button>
         </div>
-        <div class="mt-4 grid gap-4 lg:grid-cols-2">
-          <div v-for="port in serialPorts" :key="port.key" class="serial-config-panel">
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <div class="text-base font-semibold">{{ port.label }}</div>
-              </div>
-              <el-button type="primary" :loading="serialSaving === port.key" @click="saveSerialConfig(port.key)">
-                {{ t.save }}
-              </el-button>
-            </div>
+        <div class="mt-4 grid gap-4">
+          <div class="serial-config-panel">
             <div class="mt-4 grid gap-3">
               <div class="field-block">
                 <div class="field-label">Baud</div>
-                <el-select v-model="serialForms[port.key].baud">
+                <el-select v-model="serialForms.uart1.baud">
                   <el-option v-for="rate in baudRateOptions" :key="rate" :label="String(rate)" :value="rate" />
                 </el-select>
               </div>
               <div class="field-block">
-                  <div class="field-label">Data Bits</div>
-                  <el-select v-model="serialForms[port.key].data_bits">
-                    <el-option label="5" value="5" />
-                    <el-option label="6" value="6" />
-                    <el-option label="7" value="7" />
-                    <el-option label="8" value="8" />
-                  </el-select>
-                </div>
-                <div class="field-block">
-                  <div class="field-label">Parity</div>
-                  <el-select v-model="serialForms[port.key].parity">
-                    <el-option label="none" value="none" />
-                    <el-option label="even" value="even" />
-                    <el-option label="odd" value="odd" />
-                  </el-select>
-                </div>
-                <div class="field-block">
-                  <div class="field-label">Stop Bits</div>
-                  <el-select v-model="serialForms[port.key].stop_bits">
-                    <el-option label="1" value="1" />
-                    <el-option label="1.5" value="1.5" />
-                    <el-option label="2" value="2" />
-                  </el-select>
-                </div>
-                <div class="field-block">
-                  <div class="field-label">Flow</div>
-                  <el-select v-model="serialForms[port.key].flow">
-                    <el-option label="none" value="none" />
-                  </el-select>
-                </div>
+                <div class="field-label">Data Bits</div>
+                <el-select v-model="serialForms.uart1.data_bits">
+                  <el-option label="5" value="5" />
+                  <el-option label="6" value="6" />
+                  <el-option label="7" value="7" />
+                  <el-option label="8" value="8" />
+                </el-select>
+              </div>
+              <div class="field-block">
+                <div class="field-label">Parity</div>
+                <el-select v-model="serialForms.uart1.parity">
+                  <el-option label="none" value="none" />
+                  <el-option label="even" value="even" />
+                  <el-option label="odd" value="odd" />
+                </el-select>
+              </div>
+              <div class="field-block">
+                <div class="field-label">Stop Bits</div>
+                <el-select v-model="serialForms.uart1.stop_bits">
+                  <el-option label="1" value="1" />
+                  <el-option label="1.5" value="1.5" />
+                  <el-option label="2" value="2" />
+                </el-select>
+              </div>
+              <div class="field-block">
+                <div class="field-label">Flow</div>
+                <el-select v-model="serialForms.uart1.flow">
+                  <el-option label="none" value="none" />
+                </el-select>
+              </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+              <el-button type="primary" :loading="serialSaving === 'uart1'" @click="saveSerialConfig('uart1')">{{ t.save }}</el-button>
             </div>
           </div>
         </div>
         <div class="mt-4 flex justify-end">
-          <el-button @click="serialDialogVisible = false">{{ t.close }}</el-button>
+          <el-button @click="serialDialogVisible.uart1 = false">{{ t.close }}</el-button>
+        </div>
+      </div>
+    </div>
+    <div v-if="serialDialogVisible.rs485" class="modal-backdrop" @click.self="serialDialogVisible.rs485 = false">
+      <div class="serial-dialog">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <div class="text-lg font-semibold">{{ t.serialConfig }} - RS485</div>
+            <div class="mt-1 text-xs text-muted-foreground">{{ t.serialConfigHint }}</div>
+          </div>
+          <button class="quick-menu-button" type="button" :title="t.close" @click="serialDialogVisible.rs485 = false">x</button>
+        </div>
+        <div class="mt-4 grid gap-4">
+          <div class="serial-config-panel">
+            <div class="mt-4 grid gap-3">
+              <div class="field-block">
+                <div class="field-label">Baud</div>
+                <el-select v-model="serialForms.rs485.baud">
+                  <el-option v-for="rate in baudRateOptions" :key="rate" :label="String(rate)" :value="rate" />
+                </el-select>
+              </div>
+              <div class="field-block">
+                <div class="field-label">Data Bits</div>
+                <el-select v-model="serialForms.rs485.data_bits">
+                  <el-option label="5" value="5" />
+                  <el-option label="6" value="6" />
+                  <el-option label="7" value="7" />
+                  <el-option label="8" value="8" />
+                </el-select>
+              </div>
+              <div class="field-block">
+                <div class="field-label">Parity</div>
+                <el-select v-model="serialForms.rs485.parity">
+                  <el-option label="none" value="none" />
+                  <el-option label="even" value="even" />
+                  <el-option label="odd" value="odd" />
+                </el-select>
+              </div>
+              <div class="field-block">
+                <div class="field-label">Stop Bits</div>
+                <el-select v-model="serialForms.rs485.stop_bits">
+                  <el-option label="1" value="1" />
+                  <el-option label="1.5" value="1.5" />
+                  <el-option label="2" value="2" />
+                </el-select>
+              </div>
+              <div class="field-block">
+                <div class="field-label">Flow</div>
+                <el-select v-model="serialForms.rs485.flow">
+                  <el-option label="none" value="none" />
+                </el-select>
+              </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+              <el-button type="primary" :loading="serialSaving === 'rs485'" @click="saveSerialConfig('rs485')">{{ t.save }}</el-button>
+            </div>
+          </div>
+        </div>
+        <div class="mt-4 flex justify-end">
+          <el-button @click="serialDialogVisible.rs485 = false">{{ t.close }}</el-button>
         </div>
       </div>
     </div>
@@ -723,9 +785,9 @@ const chipConfigInput = ref("");
 const importingChipConfig = ref(false);
 const parsingFlm = ref(false);
 const offlineSettingsSaving = ref(false);
-const serialLoading = ref(false);
+const serialLoading = ref("");
 const serialSaving = ref("");
-const serialDialogVisible = ref(false);
+const serialDialogVisible = reactive({ uart1: false, rs485: false });
 const canConfigSaving = ref(false);
 const meta = reactive({ firmwareVersion: "v1.0.0", onlineEngineerCount: 1, deviceOnline: false });
 const toasts = ref([]);
@@ -1447,8 +1509,8 @@ function applySerialPayload(payload = {}) {
   }
 }
 
-async function loadSerialConfig() {
-  serialLoading.value = true;
+async function loadSerialConfig(loadingPort = "all") {
+  serialLoading.value = loadingPort;
   try {
     const response = await fetch("/api/serial");
     const payload = await readJsonResponse(response, "Load serial config failed");
@@ -1457,13 +1519,17 @@ async function loadSerialConfig() {
   } catch (err) {
     showToast(err.message, "error");
   } finally {
-    serialLoading.value = false;
+    serialLoading.value = "";
   }
 }
 
-async function openSerialConfig() {
-  serialDialogVisible.value = true;
-  await loadSerialConfig();
+async function openSerialConfig(port) {
+  try {
+    await loadSerialConfig(port);
+    if (port === "uart1" || port === "rs485") serialDialogVisible[port] = true;
+  } finally {
+    serialLoading.value = "";
+  }
 }
 
 async function saveCanConfig() {
