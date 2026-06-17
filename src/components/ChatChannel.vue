@@ -28,30 +28,72 @@
     <div class="grid gap-3 md:grid-cols-2">
       <div class="field-block">
         <div class="field-label">{{ labels.sendFormat }}</div>
-        <div class="format-switch" role="group" :aria-label="labels.sendFormat">
-          <button
-            v-for="option in labels.formatOptions"
-            :key="option.value"
-            type="button"
-            :class="['format-option', channel.sendFormat === option.value ? 'active' : '']"
-            @click="changeSendFormat(option.value)"
-          >
-            {{ option.label }}
-          </button>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="format-switch format-switch-inline" role="group" :aria-label="labels.sendFormat">
+            <button
+              v-for="option in labels.commonFormatOptions"
+              :key="option.value"
+              type="button"
+              :class="['format-option', channel.sendFormat === option.value ? 'active' : '']"
+              @click="changeSendFormat(option.value)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+          <el-dropdown trigger="click" placement="bottom-end" :hide-on-click="false" popper-class="quick-menu-popper">
+            <button class="quick-menu-button" type="button" :title="labels.moreFormats">
+              <el-icon><MoreHorizontal /></el-icon>
+            </button>
+            <template #dropdown>
+              <div class="quick-menu">
+                <button
+                  v-for="option in labels.moreFormatOptions"
+                  :key="option.value"
+                  class="quick-menu-item"
+                  type="button"
+                  @click="changeSendFormat(option.value)"
+                >
+                  <span>{{ option.label }}</span>
+                  <span v-if="channel.sendFormat === option.value" class="text-xs text-emerald-600">{{ labels.selected }}</span>
+                </button>
+              </div>
+            </template>
+          </el-dropdown>
         </div>
       </div>
       <div class="field-block">
         <div class="field-label">{{ labels.receiveFormat }}</div>
-        <div class="format-switch" role="group" :aria-label="labels.receiveFormat">
-          <button
-            v-for="option in labels.formatOptions"
-            :key="option.value"
-            type="button"
-            :class="['format-option', channel.receiveFormat === option.value ? 'active' : '']"
-            @click="changeReceiveFormat(option.value)"
-          >
-            {{ option.label }}
-          </button>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="format-switch format-switch-inline" role="group" :aria-label="labels.receiveFormat">
+            <button
+              v-for="option in labels.commonFormatOptions"
+              :key="option.value"
+              type="button"
+              :class="['format-option', channel.receiveFormat === option.value ? 'active' : '']"
+              @click="changeReceiveFormat(option.value)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+          <el-dropdown trigger="click" placement="bottom-end" :hide-on-click="false" popper-class="quick-menu-popper">
+            <button class="quick-menu-button" type="button" :title="labels.moreFormats">
+              <el-icon><MoreHorizontal /></el-icon>
+            </button>
+            <template #dropdown>
+              <div class="quick-menu">
+                <button
+                  v-for="option in labels.moreFormatOptions"
+                  :key="option.value"
+                  class="quick-menu-item"
+                  type="button"
+                  @click="changeReceiveFormat(option.value)"
+                >
+                  <span>{{ option.label }}</span>
+                  <span v-if="channel.receiveFormat === option.value" class="text-xs text-emerald-600">{{ labels.selected }}</span>
+                </button>
+              </div>
+            </template>
+          </el-dropdown>
         </div>
       </div>
     </div>
@@ -82,6 +124,15 @@
         </div>
       </template>
       <div v-else class="text-sm text-muted-foreground">{{ labels.waiting }}</div>
+    </div>
+
+    <div class="file-send-row">
+      <input class="file-input flex-1" type="file" @change="onFileChange">
+      <Button variant="outline" :disabled="!channel.connected || !channel.selectedFile" @click="$emit('file-send')">
+        <el-icon><Upload /></el-icon>
+        {{ labels.sendFile || "Send File" }}
+      </Button>
+      <span class="text-xs text-muted-foreground">{{ labels.fileSizeLimit || "Max 64KB" }}</span>
     </div>
 
     <div class="message-input-row">
@@ -151,28 +202,31 @@
 </template>
 
 <script setup>
-import { nextTick, ref, watch } from "vue";
-import { MoreHorizontal, Plus, Trash2 } from "@lucide/vue";
+import { computed, nextTick, ref, watch } from "vue";
+import { MoreHorizontal, Plus, Trash2, Upload } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import CheckboxCompat from "./shadcn-compat/ElCheckbox.vue";
 import SelectItem from "./shadcn-compat/ElOption.vue";
 import ElDropdown from "./shadcn-compat/ElDropdown.vue";
 import ElIcon from "./shadcn-compat/ElIcon.vue";
-import { normalizeHexMessage } from "../utils/messageFormat";
+import { normalizeMessageForFormat } from "../utils/messageFormat";
 
 const props = defineProps({
   channel: { type: Object, required: true },
   labels: { type: Object, required: true }
 });
 
-const emit = defineEmits(["connect", "close", "send", "clear", "format-change", "timer-change"]);
+const emit = defineEmits(["connect", "close", "send", "clear", "format-change", "timer-change", "file-send"]);
 const chatViewRef = ref(null);
+
+function onFileChange(event) {
+  props.channel.selectedFile = event.target.files?.[0] || null;
+}
 
 function changeSendFormat(value) {
   if (props.channel.sendFormat === value) return;
   props.channel.sendFormat = value;
-  if (value === "hex") props.channel.message = normalizeHexMessage(props.channel.message);
 }
 
 function changeReceiveFormat(value) {

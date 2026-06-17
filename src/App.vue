@@ -30,7 +30,7 @@
           ]"
           @click="currentPage = item.key"
         >
-          <el-icon><component :is="item.icon" /></el-icon>
+          <el-icon class="sidebar-icon"><component :is="item.icon" /></el-icon>
           <span v-if="!collapsed">{{ item.label }}</span>
         </button>
       </nav>
@@ -42,17 +42,8 @@
           class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           @click="openHelp"
         >
-          <el-icon><QuestionFilled /></el-icon>
+          <el-icon class="sidebar-icon"><QuestionFilled /></el-icon>
           <span v-if="!collapsed">{{ t.helpDocs }}</span>
-        </button>
-        <button
-          :title="collapsed ? t.darkMode : undefined"
-          :aria-label="t.darkMode"
-          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-          @click="darkMode = !darkMode"
-        >
-          <el-icon><Moon /></el-icon>
-          <span v-if="!collapsed">{{ t.darkMode }}</span>
         </button>
         <button
           :title="collapsed ? t.collapse : undefined"
@@ -60,7 +51,7 @@
           class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           @click="collapsed = !collapsed"
         >
-          <el-icon><component :is="collapsed ? Expand : Fold" /></el-icon>
+          <el-icon class="sidebar-icon"><component :is="collapsed ? Expand : Fold" /></el-icon>
           <span v-if="!collapsed">{{ t.collapse }}</span>
         </button>
       </div>
@@ -344,7 +335,7 @@
               </template>
               <div class="field-block mb-4">
                 <div class="field-label">{{ t.deviceToken }}</div>
-                <el-input v-model="chatDeviceToken" :disabled="channels.general.connected || channels.rs485.connected" placeholder="6bf3418a09725d07">
+                <el-input v-model="chatDeviceToken" :disabled="anyChannelConnected" placeholder="6bf3418a09725d07">
                   <template #append>
                     <el-tooltip :content="t.deviceTokenHelp" placement="top" effect="light">
                       <button class="token-help-button" type="button" aria-label="Device token help">?</button>
@@ -356,13 +347,94 @@
             <section class="grid gap-5 xl:grid-cols-2">
               <el-card class="control-card" shadow="never">
                 <template #header><span class="text-base font-semibold">{{ t.generalChat }}</span></template>
-                <chat-channel :channel="channels.general" :labels="t" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @clear="clearChannel('general')" @format-change="persistChatFormat('general')" @timer-change="syncTimedSend('general')" />
+              <chat-channel :channel="channels.general" :labels="t" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @file-send="sendChannelFile('general')" @clear="clearChannel('general')" @format-change="persistChatFormat('general')" @timer-change="syncTimedSend('general')" />
               </el-card>
               <el-card class="control-card" shadow="never">
                 <template #header><span class="text-base font-semibold">{{ t.rs485Chat }}</span></template>
-                <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @clear="clearChannel('rs485')" @format-change="persistChatFormat('rs485')" @timer-change="syncTimedSend('rs485')" />
+              <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @file-send="sendChannelFile('rs485')" @clear="clearChannel('rs485')" @format-change="persistChatFormat('rs485')" @timer-change="syncTimedSend('rs485')" />
               </el-card>
             </section>
+          </section>
+        </template>
+
+        <template v-else-if="currentPage === 'can'">
+          <section class="space-y-5">
+            <el-card class="control-card" shadow="never">
+              <template #header>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="text-base font-semibold">{{ t.canChat }}</div>
+                    <div class="text-xs text-slate-500">{{ t.canHint }}</div>
+                  </div>
+                  <el-tag :type="channels.can.connected ? 'success' : 'info'" effect="light">{{ channels.can.connected ? t.connected : t.disconnected }}</el-tag>
+                </div>
+              </template>
+              <div class="field-block">
+                <div class="field-label">{{ t.deviceToken }}</div>
+                <el-input v-model="chatDeviceToken" :disabled="anyChannelConnected" placeholder="6bf3418a09725d07">
+                  <template #append>
+                    <el-tooltip :content="t.deviceTokenHelp" placement="top" effect="light">
+                      <button class="token-help-button" type="button" aria-label="Device token help">?</button>
+                    </el-tooltip>
+                  </template>
+                </el-input>
+              </div>
+              <div class="flex justify-end">
+                <el-button :loading="serialLoading" @click="openSerialConfig">{{ t.serialConfig }}</el-button>
+              </div>
+            </el-card>
+            <el-card class="control-card" shadow="never">
+              <template #header><span class="text-base font-semibold">{{ t.canChat }}</span></template>
+              <div class="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+                <div class="field-block">
+                  <div class="field-label">{{ t.canBitrate }}</div>
+                  <el-select v-model="canConfig.bitrate">
+                    <el-option v-for="rate in canBitrateOptions" :key="rate" :label="String(rate)" :value="rate" />
+                  </el-select>
+                </div>
+                <div class="flex items-end">
+                  <el-button type="primary" :loading="canConfigSaving" @click="saveCanConfig">{{ t.save }}</el-button>
+                </div>
+              </div>
+              <chat-channel :channel="channels.can" :labels="t" @connect="connectChannel('can')" @close="closeChannel('can')" @send="sendChannel('can')" @file-send="sendChannelFile('can')" @clear="clearChannel('can')" @format-change="persistChatFormat('can')" @timer-change="syncTimedSend('can')" />
+            </el-card>
+          </section>
+        </template>
+
+        <template v-else-if="currentPage === 'groups'">
+          <section class="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+            <el-card class="control-card" shadow="never">
+              <template #header><span class="text-base font-semibold">{{ t.deviceGroups }}</span></template>
+              <div class="space-y-3">
+                <button
+                  v-for="group in deviceGroups"
+                  :key="group.id"
+                  type="button"
+                  :class="['group-item', selectedGroupId === group.id ? 'active' : '']"
+                  @click="selectedGroupId = group.id"
+                >
+                  <span class="font-medium">{{ group.name }}</span>
+                  <span class="text-xs text-muted-foreground">{{ devicesInGroup(group.id).length }} {{ t.devices }}</span>
+                </button>
+                <div class="space-y-2 border-t border-border pt-3">
+                  <el-input v-model="newGroupName" :placeholder="t.newGroupName" />
+                  <el-button type="primary" @click="createGroup">{{ t.createGroup }}</el-button>
+                </div>
+              </div>
+            </el-card>
+            <el-card class="control-card" shadow="never">
+              <template #header><span class="text-base font-semibold">{{ t.groupDevices }}</span></template>
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div v-for="device in devicesInGroup(selectedGroupId)" :key="device.id" class="device-card">
+                  <div class="font-medium">{{ device.name }}</div>
+                  <div class="mt-1 text-xs text-muted-foreground">{{ device.type }}</div>
+                  <el-select v-model="device.groupId" class="mt-3">
+                    <el-option v-for="group in deviceGroups" :key="group.id" :label="group.name" :value="group.id" />
+                  </el-select>
+                </div>
+                <div v-if="!devicesInGroup(selectedGroupId).length" class="text-sm text-muted-foreground">{{ t.waiting }}</div>
+              </div>
+            </el-card>
           </section>
         </template>
 
@@ -512,6 +584,71 @@
         </template>
       </div>
     </main>
+    <div v-if="serialDialogVisible" class="modal-backdrop" @click.self="serialDialogVisible = false">
+      <div class="serial-dialog">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <div class="text-lg font-semibold">{{ t.serialConfig }}</div>
+            <div class="mt-1 text-xs text-muted-foreground">{{ t.serialConfigHint }}</div>
+          </div>
+          <button class="quick-menu-button" type="button" :title="t.close" @click="serialDialogVisible = false">x</button>
+        </div>
+        <div class="mt-4 grid gap-4 lg:grid-cols-2">
+          <div v-for="port in serialPorts" :key="port.key" class="serial-config-panel">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="text-base font-semibold">{{ port.label }}</div>
+              </div>
+              <el-button type="primary" :loading="serialSaving === port.key" @click="saveSerialConfig(port.key)">
+                {{ t.save }}
+              </el-button>
+            </div>
+            <div class="mt-4 grid gap-3">
+              <div class="field-block">
+                <div class="field-label">Baud</div>
+                <el-select v-model="serialForms[port.key].baud">
+                  <el-option v-for="rate in baudRateOptions" :key="rate" :label="String(rate)" :value="rate" />
+                </el-select>
+              </div>
+              <div class="field-block">
+                  <div class="field-label">Data Bits</div>
+                  <el-select v-model="serialForms[port.key].data_bits">
+                    <el-option label="5" value="5" />
+                    <el-option label="6" value="6" />
+                    <el-option label="7" value="7" />
+                    <el-option label="8" value="8" />
+                  </el-select>
+                </div>
+                <div class="field-block">
+                  <div class="field-label">Parity</div>
+                  <el-select v-model="serialForms[port.key].parity">
+                    <el-option label="none" value="none" />
+                    <el-option label="even" value="even" />
+                    <el-option label="odd" value="odd" />
+                  </el-select>
+                </div>
+                <div class="field-block">
+                  <div class="field-label">Stop Bits</div>
+                  <el-select v-model="serialForms[port.key].stop_bits">
+                    <el-option label="1" value="1" />
+                    <el-option label="1.5" value="1.5" />
+                    <el-option label="2" value="2" />
+                  </el-select>
+                </div>
+                <div class="field-block">
+                  <div class="field-label">Flow</div>
+                  <el-select v-model="serialForms[port.key].flow">
+                    <el-option label="none" value="none" />
+                  </el-select>
+                </div>
+            </div>
+          </div>
+        </div>
+        <div class="mt-4 flex justify-end">
+          <el-button @click="serialDialogVisible = false">{{ t.close }}</el-button>
+        </div>
+      </div>
+    </div>
     <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2">
       <div
         v-for="toast in toasts"
@@ -548,8 +685,8 @@ import ElTabPane from "./components/shadcn-compat/ElTabPane.vue";
 import ElTabs from "./components/shadcn-compat/ElTabs.vue";
 import ElTag from "./components/shadcn-compat/ElTag.vue";
 import ElTooltip from "./components/shadcn-compat/ElTooltip.vue";
-import { DEFAULT_DEVICE_TOKEN, FORMAT_OPTIONS, QUICK_PHRASES } from "./constants";
-import { normalizeHexMessage } from "./utils/messageFormat";
+import { COMMON_FORMAT_OPTIONS, DEFAULT_DEVICE_TOKEN, FORMAT_OPTIONS, MORE_FORMAT_OPTIONS, QUICK_PHRASES } from "./constants";
+import { normalizeBase64Message, normalizeHexMessage, normalizeMessageForFormat } from "./utils/messageFormat";
 import { formatChatTime } from "./utils/time";
 import {
   ChatDotRound,
@@ -558,12 +695,12 @@ import {
   Download,
   Expand,
   Fold,
+  House,
   Moon,
   Monitor,
   Promotion,
   QuestionFilled,
   Sunny,
-  SwitchButton,
   UserFilled
 } from "@element-plus/icons-vue";
 
@@ -586,12 +723,39 @@ const chipConfigInput = ref("");
 const importingChipConfig = ref(false);
 const parsingFlm = ref(false);
 const offlineSettingsSaving = ref(false);
+const serialLoading = ref(false);
+const serialSaving = ref("");
+const serialDialogVisible = ref(false);
+const canConfigSaving = ref(false);
 const meta = reactive({ firmwareVersion: "v1.0.0", onlineEngineerCount: 1, deviceOnline: false });
 const toasts = ref([]);
 let chatMessageSeq = 0;
 let toastSeq = 0;
 const CHAT_QUICK_PHRASES_STORAGE_PREFIX = "portvortex.chat.quickPhrases.";
 const feedbackForm = reactive({ title: "", type: "bug", contact: "", content: "" });
+const serialRaw = reactive({ uart1: "", rs485: "", can: "" });
+const serialForms = reactive({
+  uart1: { baud: 115200, data_bits: "8", parity: "none", stop_bits: "1", flow: "none" },
+  rs485: { baud: 9600, data_bits: "8", parity: "even", stop_bits: "1", flow: "none" },
+  can: { baud: 500000, data_bits: "8", parity: "none", stop_bits: "1", flow: "none" }
+});
+const baudRateOptions = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 1500000, 2000000];
+const canBitrateOptions = [50000, 100000, 125000, 250000, 500000, 800000, 1000000];
+const canConfig = reactive({ bitrate: 500000 });
+const deviceGroups = ref([
+  { id: "default", name: "Default" }
+]);
+const selectedGroupId = ref("default");
+const newGroupName = ref("");
+const groupDevices = ref([
+  { id: "dev-1", name: "Device A", type: "UART1", groupId: "default" },
+  { id: "dev-2", name: "Device B", type: "RS485", groupId: "default" },
+  { id: "dev-3", name: "Device C", type: "CAN", groupId: "default" }
+]);
+const serialPorts = [
+  { key: "uart1", label: "UART1", kind: "serial" },
+  { key: "rs485", label: "RS485", kind: "serial" }
+];
 
 const user = reactive({
   name: "陈工",
@@ -658,6 +822,13 @@ const copy = {
     chatHint: "普通主题与 RS485 主题分开连接。",
     generalChat: "串口1",
     rs485Chat: "RS485",
+    canChat: "CAN",
+    canHint: "CAN 使用独立主题；发送内容会作为原始数据直接发布。",
+    serialConfig: "串口配置",
+    serialConfigHint: "配置 UART1、RS485 的串口参数，并调整 CAN 总线速率。",
+    refresh: "刷新",
+    save: "保存",
+    serialSaved: "串口配置已保存",
     logs: "日志",
     chat: "实时对话",
     feedback: "问题反馈",
@@ -675,6 +846,10 @@ const copy = {
     quickInsert: "快捷词条",
     quickPhrases: QUICK_PHRASES,
     formatOptions: FORMAT_OPTIONS,
+    commonFormatOptions: COMMON_FORMAT_OPTIONS,
+    moreFormatOptions: MORE_FORMAT_OPTIONS,
+    moreFormats: "更多编码",
+    selected: "已选",
     toolVersion: "V1.0",
     toolVersionCard: "在线工具版本",
     chatBridgeHint: "可在此通过虚拟串口或转发桥接与服务器通信。",
@@ -768,6 +943,13 @@ const copy = {
     chatHint: "General and RS485 channels are connected separately.",
     generalChat: "Serial 1",
     rs485Chat: "RS485",
+    canChat: "CAN",
+    canHint: "CAN uses dedicated topics. Message content is published as raw data.",
+    serialConfig: "Serial Config",
+    serialConfigHint: "Configure UART1 and RS485 serial parameters, plus CAN bus bitrate.",
+    refresh: "Refresh",
+    save: "Save",
+    serialSaved: "Serial config saved",
     logs: "Logs",
     chat: "Live Chat",
     feedback: "Feedback",
@@ -785,6 +967,10 @@ const copy = {
     quickInsert: "Quick phrases",
     quickPhrases: QUICK_PHRASES,
     formatOptions: FORMAT_OPTIONS,
+    commonFormatOptions: COMMON_FORMAT_OPTIONS,
+    moreFormatOptions: MORE_FORMAT_OPTIONS,
+    moreFormats: "More encodings",
+    selected: "Selected",
     toolVersion: "V1.0",
     toolVersionCard: "Online Tool Version",
     chatBridgeHint: "You can bridge to the server through a virtual serial port or relay.",
@@ -861,10 +1047,36 @@ Object.assign(copy.en, {
   offlineSettingsSaved: "Offline settings applied"
 });
 
+Object.assign(copy.zh, {
+  canBitrate: "CAN速率",
+  deviceGroups: "设备分组",
+  newGroupName: "新建分组名称",
+  createGroup: "新建分组",
+  groupDevices: "设备归组",
+  devices: "设备",
+  sendFile: "发送文件",
+  fileSizeLimit: "最大64KB",
+  fileTooLarge: "文件过大，最大64KB"
+});
+
+Object.assign(copy.en, {
+  canBitrate: "CAN bitrate",
+  deviceGroups: "Device Groups",
+  newGroupName: "New group name",
+  createGroup: "Create group",
+  groupDevices: "Group Devices",
+  devices: "devices",
+  sendFile: "Send File",
+  fileSizeLimit: "Max 64KB",
+  fileTooLarge: "File too large. Max 64KB."
+});
+
 const t = computed(() => copy[lang.value]);
 const pageTitle = computed(() => {
   if (currentPage.value === "profile") return t.value.profile;
   if (currentPage.value === "chat") return t.value.chat;
+  if (currentPage.value === "can") return t.value.canChat;
+  if (currentPage.value === "groups") return t.value.deviceGroups;
   if (currentPage.value === "feedback") return t.value.feedback;
   if (currentPage.value === "logs") return t.value.logs;
   return t.value.title;
@@ -939,19 +1151,23 @@ for (const field of customFields) flash[field.key] = "";
 const chatDeviceToken = ref(DEFAULT_DEVICE_TOKEN);
 
 const channels = reactive({
-  general: createChannelState("general", "/qos1", "/qos0"),
-  rs485: createChannelState("rs485", "/rs485/qos1", "/rs485/qos0")
+  general: createChannelState("general", "/qos1", "/qos0", "uart"),
+  rs485: createChannelState("rs485", "/rs485/qos1", "/rs485/qos0", "rs485"),
+  can: createChannelState("can", "/can/qos1", "/can/qos0", "can")
 });
 
 const sideNav = computed(() => [
   { key: "download", label: t.value.downloadSetup, icon: Download },
   { key: "chat", label: t.value.chat, icon: ChatDotRound },
+  { key: "groups", label: t.value.deviceGroups, icon: House },
+  { key: "can", label: t.value.canChat, icon: Connection },
   { key: "feedback", label: t.value.feedback, icon: Promotion },
   { key: "logs", label: t.value.logs, icon: Document },
   { key: "profile", label: t.value.profile, icon: UserFilled }
 ]);
 
-const deviceOnline = computed(() => meta.deviceOnline || flashing.value || channels.general.connected || channels.rs485.connected);
+const anyChannelConnected = computed(() => Object.values(channels).some((channel) => channel.connected));
+const deviceOnline = computed(() => meta.deviceOnline || flashing.value || anyChannelConnected.value);
 const onlineBadgeText = computed(() => deviceOnline.value ? t.value.deviceOnline : t.value.deviceOffline);
 const infoCards = computed(() => [
   { label: t.value.modelCard, value: "WifiLinker", hint: t.value.targetModel, icon: Monitor, bar: "bg-gradient-to-r from-sky-500 to-cyan-400" },
@@ -970,7 +1186,7 @@ const logText = computed(() => logs.value.length ? logs.value.join("\n") : t.val
 const chatLogItems = computed(() => Object.entries(channels)
   .flatMap(([key, channel]) => channel.messages.map((item) => ({
     id: `${key}-${item.id}`,
-    channel: key === "general" ? t.value.generalChat : t.value.rs485Chat,
+    channel: key === "general" ? t.value.generalChat : key === "rs485" ? t.value.rs485Chat : t.value.canChat,
     at: item.at,
     text: `${item.direction || item.status}: ${item.message}`
   })))
@@ -985,6 +1201,7 @@ onMounted(async () => {
   } catch (_) {
     // Metadata is optional for the UI.
   }
+  loadSerialConfig();
 });
 
 onBeforeUnmount(() => {
@@ -1013,7 +1230,7 @@ function saveQuickPhrases(key, phrases) {
   window.localStorage.setItem(`${CHAT_QUICK_PHRASES_STORAGE_PREFIX}${key}`, JSON.stringify(cleaned));
 }
 
-function createChannelState(key, subscribeTopic, publishTopic) {
+function createChannelState(key, subscribeTopic, publishTopic, target) {
   return reactive({
     id: "",
     connected: false,
@@ -1021,6 +1238,7 @@ function createChannelState(key, subscribeTopic, publishTopic) {
     message: "",
     subscribeTopic,
     publishTopic,
+    target,
     clientId: "",
     showTimestamp: true,
     autoScroll: true,
@@ -1032,6 +1250,7 @@ function createChannelState(key, subscribeTopic, publishTopic) {
     timedTimer: null,
     appendEnabled: false,
     appendValue: "",
+    selectedFile: null,
     quickPhrases: loadQuickPhrases(key),
     newPhrase: "",
     messages: [],
@@ -1045,12 +1264,15 @@ function syncChatTopics() {
   channels.general.publishTopic = `/topic/productid${token}/qos0`;
   channels.rs485.subscribeTopic = `/topic/productid${token}/rs485/qos1`;
   channels.rs485.publishTopic = `/topic/productid${token}/rs485/qos0`;
+  channels.can.subscribeTopic = `/topic/productid${token}/can/qos1`;
+  channels.can.publishTopic = `/topic/productid${token}/can/qos0`;
 }
 
 syncChatTopics();
 
 watch(() => channels.general.quickPhrases, (phrases) => saveQuickPhrases("general", phrases), { deep: true });
 watch(() => channels.rs485.quickPhrases, (phrases) => saveQuickPhrases("rs485", phrases), { deep: true });
+watch(() => channels.can.quickPhrases, (phrases) => saveQuickPhrases("can", phrases), { deep: true });
 
 function syncMetaPayload(payload) {
   targetOptions.value = payload.targets || targetOptions.value;
@@ -1199,6 +1421,97 @@ async function readJsonResponse(response, fallbackMessage) {
     return JSON.parse(text);
   } catch (_) {
     throw new Error(`${fallbackMessage}: HTTP ${response.status} ${text.slice(0, 120)}`);
+  }
+}
+
+function parseSerialSetting(text) {
+  const params = new URLSearchParams(String(text || "").replace(/;/g, "&"));
+  return {
+    baud: Number(params.get("baud") || params.get("bitrate") || 115200),
+    data_bits: params.get("data_bits") || "8",
+    parity: params.get("parity") || "none",
+    stop_bits: params.get("stop_bits") || "1",
+    flow: params.get("flow") || "none"
+  };
+}
+
+function applySerialPayload(payload = {}) {
+  for (const port of serialPorts) {
+    if (!payload[port.key]) continue;
+    serialRaw[port.key] = payload[port.key];
+    Object.assign(serialForms[port.key], parseSerialSetting(payload[port.key]));
+  }
+  if (payload.can) {
+    serialRaw.can = payload.can;
+    canConfig.bitrate = parseSerialSetting(payload.can).baud;
+  }
+}
+
+async function loadSerialConfig() {
+  serialLoading.value = true;
+  try {
+    const response = await fetch("/api/serial");
+    const payload = await readJsonResponse(response, "Load serial config failed");
+    if (!response.ok) throw new Error(payload.error || "serial config load failed");
+    applySerialPayload(payload);
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    serialLoading.value = false;
+  }
+}
+
+async function openSerialConfig() {
+  serialDialogVisible.value = true;
+  await loadSerialConfig();
+}
+
+async function saveCanConfig() {
+  canConfigSaving.value = true;
+  try {
+    const response = await fetch("/api/serial", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ port: "can", bitrate: String(canConfig.bitrate) })
+    });
+    const payload = await readJsonResponse(response, "Save CAN config failed");
+    if (!response.ok) throw new Error(payload.error || "CAN config save failed");
+    await loadSerialConfig();
+    showToast(t.value.serialSaved, "success");
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    canConfigSaving.value = false;
+  }
+}
+
+async function saveSerialConfig(port) {
+  const form = serialForms[port];
+  serialSaving.value = port;
+  try {
+    const body = port === "can"
+      ? new URLSearchParams({ port, bitrate: String(form.baud) })
+      : new URLSearchParams({
+        port,
+        baud: String(form.baud),
+        data_bits: String(form.data_bits),
+        parity: String(form.parity),
+        stop_bits: String(form.stop_bits),
+        flow: String(form.flow || "none")
+      });
+    const response = await fetch("/api/serial", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
+    const payload = await readJsonResponse(response, "Save serial config failed");
+    if (!response.ok) throw new Error(payload.error || "serial config save failed");
+    await loadSerialConfig();
+    showToast(t.value.serialSaved, "success");
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    serialSaving.value = "";
   }
 }
 
@@ -1373,6 +1686,7 @@ async function connectChannel(key) {
         deviceToken: chatDeviceToken.value,
         subscribeTopic: channel.subscribeTopic,
         publishTopic: channel.publishTopic,
+        channelTarget: channel.target,
         clientId: channel.clientId,
         receiveFormat: channel.receiveFormat,
         chatQos: 0
@@ -1417,10 +1731,6 @@ async function sendChannel(key) {
   if (!channel.connected || !channel.message) return;
   let message = channel.message;
   if (channel.appendEnabled && channel.appendValue) message += channel.appendValue;
-  if (channel.sendFormat === "hex") {
-    message = normalizeHexMessage(message);
-    channel.message = normalizeHexMessage(channel.message);
-  }
   const response = await fetch(`/api/chat/${channel.id}/send`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1430,6 +1740,49 @@ async function sendChannel(key) {
     pushChannelLog(channel, "ERROR: send failed");
     pushChannelMessage(channel, { status: "error", message: "send failed" });
   }
+}
+
+async function sendChannelFile(key) {
+  const channel = channels[key];
+  const file = channel.selectedFile;
+  if (!channel.connected || !file) return;
+  if (file.size > 64 * 1024) {
+    showToast(t.value.fileTooLarge, "error");
+    return;
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (channel.sendFormat === "hex") {
+    channel.message = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ").toUpperCase();
+  } else if (channel.sendFormat === "base64") {
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    channel.message = btoa(binary);
+  } else if (channel.sendFormat === "utf16le") {
+    channel.message = new TextDecoder("utf-16le", { fatal: false }).decode(bytes);
+  } else if (channel.sendFormat === "utf16be") {
+    const swapped = new Uint8Array(bytes.length);
+    for (let i = 0; i + 1 < bytes.length; i += 2) {
+      swapped[i] = bytes[i + 1];
+      swapped[i + 1] = bytes[i];
+    }
+    channel.message = new TextDecoder("utf-16le", { fatal: false }).decode(swapped);
+  } else {
+    channel.message = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  }
+  await sendChannel(key);
+}
+
+function devicesInGroup(groupId) {
+  return groupDevices.value.filter((device) => device.groupId === groupId);
+}
+
+function createGroup() {
+  const name = String(newGroupName.value || "").trim();
+  if (!name) return;
+  const id = `group-${Date.now()}`;
+  deviceGroups.value.push({ id, name });
+  selectedGroupId.value = id;
+  newGroupName.value = "";
 }
 
 function timedIntervalMs(channel) {

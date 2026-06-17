@@ -26,7 +26,13 @@ const DEFAULTS = {
   ackTimeout: 300,
   window: 3,
   erase: "sector",
-  qos: 1
+  qos: 0
+};
+
+const SERIAL_SETTINGS = {
+  uart1: "baud=115200;data_bits=8;parity=none;stop_bits=1;flow=none",
+  rs485: "baud=9600;data_bits=8;parity=even;stop_bits=1;flow=none",
+  can: "bitrate=500000"
 };
 
 const DEVICE_START_TIMEOUT_SECONDS = 10;
@@ -974,23 +980,138 @@ function normalizeMqttClientId(value) {
 
 function normalizeMessageFormat(value) {
   const format = String(value || "ascii").toLowerCase();
-  if (!["ascii", "hex"].includes(format)) throw new Error("message format must be ascii or hex");
+  if (!["ascii", "utf8", "unicode", "utf16le", "utf16be", "gbk", "gb18030", "base64", "hex"].includes(format)) {
+    throw new Error("unsupported message format");
+  }
   return format;
 }
 
 function bufferFromMessage(message, format) {
-  if (format === "ascii") return Buffer.from(String(message || ""), "utf8");
-  const text = String(message || "").replace(/\s+/g, "");
-  if (!text) return Buffer.alloc(0);
-  if (!/^[0-9a-fA-F]+$/.test(text) || text.length % 2 !== 0) {
+  const text = String(message || "");
+  if (format === "ascii" || format === "utf8") return Buffer.from(text, "utf8");
+  if (format === "unicode" || format === "utf16le") return Buffer.from(text, "utf16le");
+  if (format === "utf16be") {
+    const le = Buffer.from(text, "utf16le");
+    for (let i = 0; i + 1 < le.length; i += 2) {
+      const a = le[i];
+      le[i] = le[i + 1];
+      le[i + 1] = a;
+    }
+    return le;
+  }
+  if (format === "gbk" || format === "gb18030") return Buffer.from(text, "utf8");
+  if (format === "base64") {
+    const raw = Buffer.from(text, "base64");
+    return raw;
+  }
+  const hexText = text.replace(/\s+/g, "");
+  if (!hexText) return Buffer.alloc(0);
+  if (!/^[0-9a-fA-F]+$/.test(hexText) || hexText.length % 2 !== 0) {
     throw new Error("hex message must contain complete hexadecimal bytes");
   }
-  return Buffer.from(text, "hex");
+  return Buffer.from(hexText, "hex");
 }
 
 function messageFromBuffer(payload, format) {
   if (format === "hex") return payload.toString("hex").toUpperCase().replace(/(..)/g, "$1 ").trim();
+  if (format === "base64") return payload.toString("base64");
+  if (format === "utf16le" || format === "unicode") return payload.toString("utf16le");
+  if (format === "utf16be") {
+    const copy = Buffer.from(payload);
+    for (let i = 0; i + 1 < copy.length; i += 2) {
+      const a = copy[i];
+      copy[i] = copy[i + 1];
+      copy[i + 1] = a;
+    }
+    return copy.toString("utf16le");
+  }
   return payload.toString("utf8");
+}
+
+function normalizeChatTarget(value, publishTopic = "") {
+  const target = String(value || "").trim().toLowerCase();
+  if (["uart", "rs485", "can"].includes(target)) return target;
+  const topic = String(publishTopic || "").toLowerCase();
+  if (topic.includes("/rs485/")) return "rs485";
+  if (topic.includes("/can/")) return "can";
+  return "uart";
+}
+
+function isReadOnlyDeviceTopic(topic) {
+  const text = String(topic || "").toLowerCase();
+  return /\/(qos1|set\/ack|algo\/ack|hex\/ack|bin\/ack|uartflash\/ack)$/.test(text);
+}
+
+function normalizeSerialPort(value) {
+  const port = String(value || "").trim().toLowerCase();
+  if (!["uart1", "rs485", "can"].includes(port)) throw new Error("port must be uart1, rs485, or can");
+  return port;
+}
+
+function normalizeSerialBaud(value) {
+  const baud = Number.parseInt(String(value || "").trim(), 10);
+  if (!Number.isInteger(baud) || baud <= 0) throw new Error("baud must be a positive integer");
+  return String(baud);
+}
+
+function normalizeSerialDataBits(value) {
+  const dataBits = String(value || "").trim();
+  if (!["5", "6", "7", "8"].includes(dataBits)) throw new Error("data_bits must be 5, 6, 7, or 8");
+  return dataBits;
+}
+
+function normalizeSerialParity(value) {
+  const parity = String(value || "").trim().toLowerCase();
+  if (!["none", "even", "odd"].includes(parity)) throw new Error("parity must be none, even, or odd");
+  return parity;
+}
+
+function normalizeSerialStopBits(value) {
+  const stopBits = String(value || "").trim();
+  if (!["1", "1.5", "2"].includes(stopBits)) throw new Error("stop_bits must be 1, 1.5, or 2");
+  return stopBits;
+}
+
+function normalizeSerialFlow(value) {
+  const flow = String(value || "").trim().toLowerCase();
+  if (!["none", "rtscts"].includes(flow)) throw new Error("flow must be none or rtscts");
+  return flow;
+}
+
+function normalizeCanBitrate(value) {
+  const bitrate = Number.parseInt(String(value || "").trim(), 10);
+  if (!Number.isInteger(bitrate) || bitrate <= 0) throw new Error("bitrate must be a positive integer");
+  return String(bitrate);
+}
+
+function parseSerialFormPayload(payload) {
+  const params = new URLSearchParams(String(payload || ""));
+  const port = normalizeSerialPort(params.get("port"));
+  if (port === "can") {
+    return {
+      port,
+      value: `bitrate=${normalizeCanBitrate(params.get("bitrate") || params.get("baud"))}`
+    };
+  }
+  return {
+    port,
+    value: [
+      `baud=${normalizeSerialBaud(params.get("baud"))}`,
+      `data_bits=${normalizeSerialDataBits(params.get("data_bits"))}`,
+      `parity=${normalizeSerialParity(params.get("parity"))}`,
+      `stop_bits=${normalizeSerialStopBits(params.get("stop_bits"))}`,
+      `flow=${normalizeSerialFlow(params.get("flow") || "none")}`
+    ].join(";")
+  };
+}
+
+function normalizeHexText(value) {
+  const text = String(value || "").replace(/\s+/g, "");
+  if (!text) return "";
+  if (!/^[0-9a-fA-F]+$/.test(text) || text.length % 2 !== 0) {
+    throw new Error("hex message must contain complete hexadecimal bytes");
+  }
+  return text.toUpperCase().match(/.{1,2}/g).join(" ");
 }
 
 function payloadFingerprint(payload) {
@@ -1027,7 +1148,7 @@ async function publishSetAndWait(params, payload) {
   try {
     await client.connect();
     await client.subscribe(ackTopic, 0);
-    await client.publish(setTopic, Buffer.from(payload, "utf8"), 1);
+    await client.publish(setTopic, Buffer.from(payload, "utf8"), 0);
     const ack = parseAck(await client.waitForMessage(ackTopic, Number(params.ackTimeout || DEFAULTS.ackTimeout)));
     if (ack.status !== "set" && ack.status !== "status") {
       throw new Error(`unexpected /set ACK: ${JSON.stringify(ack)}`);
@@ -1585,6 +1706,8 @@ async function startChatSession(params) {
   const mqttPort = mqtt.port;
   const subscribeTopic = topicWithDevicePrefix(params.subscribeTopic || "qos1", mqtt.topicPrefix);
   const publishTopic = topicWithDevicePrefix(params.publishTopic || "qos0", mqtt.topicPrefix);
+  if (isReadOnlyDeviceTopic(publishTopic)) throw new Error(`publish topic is read-only: ${publishTopic}`);
+  const target = normalizeChatTarget(params.channelTarget, publishTopic);
   const clientId = normalizeMqttClientId(params.clientId);
   const receiveFormat = normalizeMessageFormat(params.receiveFormat);
   const qos = Number(params.chatQos || 0);
@@ -1598,7 +1721,8 @@ async function startChatSession(params) {
     mqttPort,
     subscribeTopic,
     publishTopic,
-    listenTopics: Array.from(new Set([subscribeTopic, publishTopic].filter(Boolean))),
+    listenTopics: Array.from(new Set([subscribeTopic].filter(Boolean))),
+    target,
     clientId,
     receiveFormat,
     qos,
@@ -1706,7 +1830,7 @@ async function sendChatMessage(chat, message, format = "ascii") {
     type: "message",
     direction: "out",
     topic: chat.publishTopic,
-    message: messageFromBuffer(payload, sendFormat)
+    message: String(message || "")
   });
 }
 
@@ -1790,11 +1914,25 @@ async function readJson(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+async function readText(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 64 * 1024) throw new Error("Body is too large");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://localhost");
     if (req.method === "GET" && url.pathname === "/api/meta") {
       return send(res, 200, JSON.stringify(getMetaSnapshot()), "application/json");
+    }
+    if (req.method === "GET" && url.pathname === "/api/serial") {
+      return send(res, 200, JSON.stringify({ ...SERIAL_SETTINGS }), "application/json");
     }
     if (req.method === "POST" && url.pathname === "/api/chip-configs/import") {
       const body = await readJson(req);
@@ -1809,6 +1947,12 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const result = await applyOfflineSettings(body);
       return send(res, 200, JSON.stringify({ ok: true, ...result }), "application/json");
+    }
+    if (req.method === "POST" && url.pathname === "/api/serial") {
+      const body = await readText(req);
+      const config = parseSerialFormPayload(body);
+      SERIAL_SETTINGS[config.port] = config.value;
+      return send(res, 200, JSON.stringify({ ok: true, ...SERIAL_SETTINGS }), "application/json");
     }
     if (req.method === "POST" && url.pathname === "/api/flm/parse") {
       const { fields, files } = await parseMultipart(req);

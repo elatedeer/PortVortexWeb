@@ -83,6 +83,13 @@ select {
   letter-spacing: 0;
 }
 
+.sidebar-icon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  font-size: 22px;
+}
+
 .token-help-button {
   display: inline-flex;
   width: 28px;
@@ -117,6 +124,11 @@ select {
   box-shadow: none;
 }
 
+.format-switch-inline {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: min(100%, 270px);
+}
+
 .format-option {
   min-height: 32px;
   border-radius: 6px;
@@ -135,6 +147,13 @@ select {
   background: var(--background);
   color: var(--foreground);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.format-option.disabled,
+.format-option:disabled {
+  cursor: not-allowed;
+  color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+  opacity: 0.55;
 }
 
 .file-input {
@@ -222,28 +241,39 @@ select {
 
 .chat-line {
   max-width: 86%;
+  border: 1px solid transparent;
+  border-radius: 8px;
   color: var(--foreground);
   font-size: 13px;
   line-height: 1.55;
+  padding: 7px 10px;
   word-break: break-word;
 }
 
 .chat-row.in .chat-line {
-  color: var(--foreground);
+  border-color: #99f6e4;
+  background: #ecfdf5;
+  color: #065f46;
 }
 
 .chat-row.out .chat-line {
-  color: var(--foreground);
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
   text-align: right;
 }
 
 .chat-row.peer .chat-line {
-  color: var(--foreground);
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
   text-align: right;
 }
 
 .chat-row.status .chat-line {
   max-width: 92%;
+  border-color: var(--border);
+  background: color-mix(in oklab, var(--muted) 70%, transparent);
   color: var(--muted-foreground);
   text-align: center;
 }
@@ -276,6 +306,83 @@ select {
   border: 1px solid var(--border);
   background: color-mix(in oklab, var(--muted) 35%, transparent);
   padding: 10px;
+}
+
+.serial-config-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--muted) 28%, transparent);
+  padding: 14px;
+}
+
+.group-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--foreground);
+  padding: 12px;
+  text-align: left;
+}
+
+.group-item.active {
+  border-color: var(--ring);
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+}
+
+.device-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--muted) 28%, transparent);
+  padding: 14px;
+}
+
+.file-send-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .file-send-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: color-mix(in oklab, var(--foreground) 30%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.serial-dialog {
+  width: min(980px, 100%);
+  max-height: min(88vh, 920px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--background);
+  color: var(--foreground);
+  padding: 18px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.24);
+}
+
+@media (max-width: 1024px) {
+  .serial-dialog {
+    width: 100%;
+    max-height: 92vh;
+  }
 }
 
 .send-option-input,
@@ -452,6 +559,12 @@ select {
   box-shadow: 0 6px 16px rgba(34, 211, 238, 0.16);
 }
 
+.dark .format-option.disabled,
+.dark .format-option:disabled {
+  color: #64748b;
+  opacity: 0.52;
+}
+
 .dark .file-input,
 .dark .channel-summary {
   border-color: #334155;
@@ -473,18 +586,26 @@ select {
 }
 
 .dark .chat-row.in .chat-line {
-  color: #bae6fd;
+  border-color: rgba(45, 212, 191, 0.36);
+  background: rgba(15, 118, 110, 0.24);
+  color: #ccfbf1;
 }
 
 .dark .chat-row.out .chat-line {
-  color: #bbf7d0;
+  border-color: rgba(96, 165, 250, 0.38);
+  background: rgba(30, 64, 175, 0.28);
+  color: #dbeafe;
 }
 
 .dark .chat-row.peer .chat-line {
-  color: #fed7aa;
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(146, 64, 14, 0.26);
+  color: #fef3c7;
 }
 
 .dark .chat-row.status .chat-line {
+  border-color: #334155;
+  background: rgba(30, 41, 59, 0.72);
   color: #cbd5e1;
 }
 
