@@ -12,6 +12,17 @@ const DIST_DIR = path.join(__dirname, "dist");
 const PUBLIC_DIR = fs.existsSync(DIST_DIR) ? DIST_DIR : path.join(__dirname, "public");
 const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
 const CHIP_CONFIG_DIR = path.join(__dirname, "chip-configs");
+const DEVICE_AUTH_FILE = path.join(__dirname, "device-auth.json");
+const SIGNED_TOPIC_SUFFIXES = new Set([
+  "/set",
+  "/target",
+  "/uartflash/target",
+  "/job",
+  "/algo/start",
+  "/hex/start",
+  "/bin/start",
+  "/uartflash/start"
+]);
 
 const DEFAULTS = {
   broker: "gsaimqtt.jnxiangchen.com",
@@ -57,6 +68,57 @@ const chats = new Map();
 
 function readJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function loadDeviceAuthStore() {
+  const store = {};
+  if (process.env.DEVICE_SECRET_HEX) {
+    const token = String(process.env.DEVICE_AUTH_TOKEN || process.env.DEVICE_ID || "default").trim();
+    store[token] = { secret: String(process.env.DEVICE_SECRET_HEX).trim() };
+  }
+  if (fs.existsSync(DEVICE_AUTH_FILE)) {
+    const parsed = readJsonFile(DEVICE_AUTH_FILE);
+    if (Array.isArray(parsed.devices)) {
+      for (const item of parsed.devices) {
+        const token = String(item.token || item.device_id || item.deviceId || "").trim();
+        const secret = String(item.secret || item.device_secret || item.deviceSecret || "").trim();
+        if (token && secret) store[token] = { secret };
+      }
+    } else if (parsed && typeof parsed === "object") {
+      for (const [token, value] of Object.entries(parsed)) {
+        const secret = typeof value === "string" ? value : value?.secret || value?.device_secret || value?.deviceSecret;
+        if (secret) store[String(token).trim()] = { secret: String(secret).trim() };
+      }
+    }
+  }
+  return store;
+}
+
+function getDeviceSecret(deviceToken) {
+  const token = String(deviceToken || "").trim();
+  const store = loadDeviceAuthStore();
+  const entry = store[token] || store[`productid${token}`] || store.default;
+  const secret = String(entry?.secret || "").trim();
+  return /^[0-9a-fA-F]{64}$/.test(secret) ? secret.toLowerCase() : "";
+}
+
+function topicSuffixFromFullTopic(topic, topicPrefix) {
+  const full = String(topic || "");
+  const prefix = String(topicPrefix || "");
+  if (prefix && full.startsWith(prefix)) return full.slice(prefix.length) || "/";
+  const marker = full.indexOf("/", "/topic/".length);
+  return marker >= 0 ? full.slice(marker) : full;
+}
+
+function appendSignedPayload(payload, topicSuffix, deviceToken) {
+  const text = Buffer.isBuffer(payload) ? payload.toString("utf8") : String(payload || "");
+  if (!SIGNED_TOPIC_SUFFIXES.has(topicSuffix)) return text;
+  const secret = getDeviceSecret(deviceToken);
+  if (!secret) return text;
+  const nonce = crypto.randomBytes(12).toString("hex");
+  const input = `${topicSuffix}\n\n${nonce}\n${text}`;
+  const sig = crypto.createHmac("sha256", Buffer.from(secret, "hex")).update(input).digest("hex");
+  return `${text}${text ? ";" : ""}nonce=${nonce};sig=${sig}`;
 }
 
 function normalizeTargetName(value) {
@@ -994,6 +1056,7 @@ function mqttConfigFromParams(params) {
     port: DEFAULTS.port,
     username: DEFAULTS.mqttUsername,
     password: DEFAULTS.mqttPassword,
+    deviceToken,
     topicPrefix: `/topic/productid${deviceToken}`
   };
 }
@@ -1153,6 +1216,13 @@ function payloadFingerprint(payload) {
   return Buffer.from(payload || Buffer.alloc(0)).toString("hex");
 }
 
+async function publishDeviceCommand(client, topic, payload, qos, context = {}) {
+  const topicSuffix = topicSuffixFromFullTopic(topic, context.topicPrefix);
+  const signedPayload = appendSignedPayload(payload, topicSuffix, context.deviceToken);
+  await client.publish(topic, Buffer.from(signedPayload, "utf8"), qos);
+  return signedPayload;
+}
+
 function boolFlag(value) {
   return value === true || value === "1" || value === "true" || value === "on" ? "1" : "0";
 }
@@ -1183,7 +1253,7 @@ async function publishSetAndWait(params, payload) {
   try {
     await client.connect();
     await client.subscribe(ackTopic, 0);
-    await client.publish(setTopic, Buffer.from(payload, "utf8"), 0);
+    await publishDeviceCommand(client, setTopic, payload, 0, mqtt);
     const ack = parseAck(await client.waitForMessage(ackTopic, Number(params.ackTimeout || DEFAULTS.ackTimeout)));
     if (ack.status !== "set" && ack.status !== "status") {
       throw new Error(`unexpected /set ACK: ${JSON.stringify(ack)}`);
@@ -1194,11 +1264,61 @@ async function publishSetAndWait(params, payload) {
   }
 }
 
+async function publishGetAndWait(params, payload) {
+  const mqtt = mqttConfigFromParams(params);
+  const getTopic = topicWithDevicePrefix("/get", mqtt.topicPrefix);
+  const ackTopic = topicWithDevicePrefix("/set/ack", mqtt.topicPrefix);
+  const nonce = crypto.randomBytes(2).toString("hex");
+  const client = new MqttClient(
+    mqtt.broker,
+    mqtt.port,
+    `web-get-${nonce}`,
+    mqtt.username,
+    mqtt.password
+  );
+
+  try {
+    await client.connect();
+    await client.subscribe(ackTopic, 0);
+    await publishDeviceCommand(client, getTopic, payload, 0, mqtt);
+    return parseAck(await client.waitForMessage(ackTopic, Number(params.ackTimeout || DEFAULTS.ackTimeout)));
+  } finally {
+    client.disconnect();
+  }
+}
+
 async function applyOfflineSettings(params) {
   const channel = params.flashMode === "swd" ? "SWD" : "UART";
   const payload = offlineAutoPayload(params);
   const ack = await publishSetAndWait(params, payload);
   return { channel, payload, ack };
+}
+
+function relayPayload(target, body = {}) {
+  const parts = [`target=${target}`];
+  if (body.gpio !== undefined && body.gpio !== "") parts.push(`gpio=${body.gpio}`);
+  if (body.active_level !== undefined && body.active_level !== "") parts.push(`active_level=${body.active_level}`);
+  if (body.state !== undefined && body.state !== "") parts.push(`state=${boolFlag(body.state)}`);
+  return parts.join(";");
+}
+
+function adcQueryPayload(params = {}) {
+  const allowedKeys = ["target", "item", "key", "cmd"];
+  for (const key of allowedKeys) {
+    const value = String(params[key] || "").trim().toLowerCase();
+    if (value === "adc") return `${key}=adc`;
+  }
+  return "target=adc";
+}
+
+async function queryAdc(params) {
+  return publishGetAndWait(params, adcQueryPayload(params));
+}
+
+async function applyRelay(params, target) {
+  const payload = relayPayload(target, params);
+  const ack = await publishSetAndWait(params, payload);
+  return { payload, ack };
 }
 
 function getMetaSnapshot() {
@@ -1214,7 +1334,8 @@ function getMetaSnapshot() {
     },
     firmwareVersion: "v1.0.0",
     onlineEngineerCount: Math.max(1, chats.size + 1),
-    deviceOnline: jobs.size > 0 || chats.size > 0
+    deviceOnline: jobs.size > 0 || chats.size > 0,
+    authConfigured: Boolean(Object.keys(loadDeviceAuthStore()).length)
   };
 }
 
@@ -1406,7 +1527,7 @@ async function uploadAlgoBlob(client, job, transfer, algoBlob, options) {
   const startText = `size=${data.length};crc32=0x${checksum}`;
 
   log(`Uploading target algorithm blob to ${transfer.topics.algoStart}: ${startText}`);
-  await client.publish(transfer.topics.algoStart, Buffer.from(startText, "utf8"), qos);
+  await publishDeviceCommand(client, transfer.topics.algoStart, startText, qos, options.mqtt);
 
   for (let offset = 0; offset < data.length; offset += chunkSize) {
     const chunk = data.slice(offset, offset + chunkSize);
@@ -1437,6 +1558,7 @@ async function runFlashJob(job, params, firmware, algoBlob) {
   const mode = params.flashMode || "swd";
   const firmwareFormat = detectFirmwareFormat(params, firmware);
   const isHex = firmwareFormat === "hex";
+  const firmwareSha256 = crypto.createHash("sha256").update(firmware.data).digest("hex");
 
   if (!firmware || !firmware.data.length) throw new Error("firmware file is empty");
   if (isHex && !firmware.data.includes(0x3a)) throw new Error("HEX firmware does not look like Intel HEX");
@@ -1508,11 +1630,11 @@ async function runFlashJob(job, params, firmware, algoBlob) {
       throw err;
     }
     if (usesUploadedAlgoBlob(params)) {
-      await uploadAlgoBlob(client, job, transfer, algoBlob, { chunkSize, ackTimeout, qos });
+      await uploadAlgoBlob(client, job, transfer, algoBlob, { chunkSize, ackTimeout, qos, mqtt });
     }
 
     log(`Publishing target profile to ${transfer.topics.target}: ${summarizeMqttPayload(transfer.profile)}`);
-    await client.publish(transfer.topics.target, Buffer.from(transfer.profile, "utf8"), qos);
+    await publishDeviceCommand(client, transfer.topics.target, transfer.profile, qos, mqtt);
     if (usesUploadedAlgoBlob(params)) {
       const delayMs = Number(params.targetApplyDelayMs || 500);
       log(`Waiting ${delayMs}ms for ESP32 to queue target profile before firmware transfer ...`);
@@ -1531,10 +1653,11 @@ async function runFlashJob(job, params, firmware, algoBlob) {
       log(`Size: ${firmware.data.length} bytes`);
       await client.publish(transfer.singleTopic, firmware.data, qos);
     } else {
-      const startPayload = Buffer.from(transfer.startText, "utf8");
+      const startText = replaceProfileToken(transfer.startText, "sha256", firmwareSha256);
+      const startPayload = Buffer.from(appendSignedPayload(startText, topicSuffixFromFullTopic(transfer.topics.start, mqtt.topicPrefix), mqtt.deviceToken), "utf8");
       log(`Starting ${transfer.label} transfer: ${firmware.filename}`);
       log(`Format: ${firmwareFormat}, size: ${firmware.data.length} bytes, chunk: ${chunkSize}, window: ${windowSize}`);
-      log(`Publishing start to ${transfer.topics.start}: ${transfer.startText}`);
+      log(`Publishing start to ${transfer.topics.start}: ${summarizeMqttPayload(startText)}`);
       await client.publish(transfer.topics.start, startPayload, qos);
       let startAck;
       try {
@@ -1982,6 +2105,20 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const result = await applyOfflineSettings(body);
       return send(res, 200, JSON.stringify({ ok: true, ...result }), "application/json");
+    }
+    if (req.method === "GET" && url.pathname === "/api/adc") {
+      const params = Object.fromEntries(url.searchParams.entries());
+      const payload = adcQueryPayload(params);
+      const ack = await queryAdc(params);
+      return send(res, 200, JSON.stringify({ ok: true, payload, ack }), "application/json");
+    }
+    if ((req.method === "GET" || req.method === "POST") && (url.pathname === "/api/relay" || url.pathname === "/api/relay2")) {
+      const target = url.pathname === "/api/relay2" ? "relay2" : "relay";
+      const params = req.method === "GET"
+        ? Object.fromEntries(url.searchParams.entries())
+        : await readJson(req);
+      const result = await applyRelay(params, target);
+      return send(res, 200, JSON.stringify({ ok: true, target, ...result }), "application/json");
     }
     if (req.method === "POST" && url.pathname === "/api/serial") {
       const body = await readText(req);
