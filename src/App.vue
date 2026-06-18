@@ -1152,6 +1152,20 @@ Object.assign(copy.en, {
 });
 
 Object.assign(copy.zh, {
+  groupVersion: "分组版本",
+  groupUpgrade: "批量升级",
+  groupUpgradeHint: "使用选择的固件，按当前分组内的设备 Token 逐个提交升级任务。",
+  batchUpgrade: "批量升级"
+});
+
+Object.assign(copy.en, {
+  groupVersion: "Group version",
+  groupUpgrade: "Batch upgrade",
+  groupUpgradeHint: "Submit upgrade jobs one by one for every device token in the selected group.",
+  batchUpgrade: "Batch upgrade"
+});
+
+Object.assign(copy.zh, {
   tokenHistory: "Token 历史",
   tokenHistoryHint: "读取本机保存过的设备 Token 连接记录，可一键应用到下载和实时通信。",
   noTokenHistory: "暂无 Token 历史记录",
@@ -1264,9 +1278,9 @@ const channels = reactive({
 const sideNav = computed(() => [
   { key: "download", label: t.value.downloadSetup, icon: Download },
   { key: "chat", label: t.value.chat, icon: ChatDotRound },
+  { key: "can", label: t.value.canChat, icon: Connection },
   { key: "groups", label: t.value.deviceGroups, icon: House },
   { key: "tokenHistory", label: t.value.tokenHistory, icon: Document },
-  { key: "can", label: t.value.canChat, icon: Connection },
   { key: "feedback", label: t.value.feedback, icon: Promotion },
   { key: "logs", label: t.value.logs, icon: Document },
   { key: "profile", label: t.value.profile, icon: UserFilled }

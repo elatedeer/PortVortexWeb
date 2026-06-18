@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import ElButton from "@/components/shadcn-compat/ElButton.vue";
 import ElCard from "@/components/shadcn-compat/ElCard.vue";
 import ElInput from "@/components/shadcn-compat/ElInput.vue";
@@ -11,13 +11,19 @@ const props = defineProps({
 });
 
 const deviceGroups = ref([
-  { id: "default", name: "Default" }
+  { id: "default", name: "Default", version: "" }
 ]);
 const selectedGroupId = ref("default");
 const newGroupName = ref("");
 const tokenImportText = ref("");
-const importDeviceType = ref("UART1");
 const groupDevices = ref([]);
+const batchFirmwareFile = ref(null);
+const batchFlashMode = ref("swd");
+const batchUpgrading = ref(false);
+const batchResults = ref([]);
+
+const selectedGroup = computed(() => deviceGroups.value.find((group) => group.id === selectedGroupId.value) || deviceGroups.value[0]);
+const selectedGroupDevices = computed(() => devicesInGroup(selectedGroupId.value));
 
 function devicesInGroup(groupId) {
   return groupDevices.value.filter((device) => device.groupId === groupId);
@@ -28,13 +34,16 @@ function findGroupByName(name) {
   return deviceGroups.value.find((group) => group.name === text) || null;
 }
 
-function ensureGroup(name) {
+function ensureGroup(name, version = "") {
   const text = String(name || "").trim();
   if (!text) return selectedGroupId.value;
   const existing = findGroupByName(text);
-  if (existing) return existing.id;
+  if (existing) {
+    if (version && !existing.version) existing.version = version;
+    return existing.id;
+  }
   const id = `group-${Date.now()}-${deviceGroups.value.length}`;
-  deviceGroups.value.push({ id, name: text });
+  deviceGroups.value.push({ id, name: text, version: String(version || "") });
   return id;
 }
 
@@ -46,14 +55,13 @@ function normalizeToken(value) {
   return /^[A-Za-z0-9_-]+$/.test(token) ? token : "";
 }
 
-function upsertDevice({ token, name, type, groupName, groupId }) {
+function upsertDevice({ token, name, groupName, groupVersion, groupId }) {
   const normalized = normalizeToken(token);
   if (!normalized) return false;
-  const targetGroupId = groupId || ensureGroup(groupName);
+  const targetGroupId = groupId || ensureGroup(groupName, groupVersion);
   const existing = groupDevices.value.find((device) => device.token === normalized);
   if (existing) {
     existing.name = name || existing.name;
-    existing.type = type || existing.type;
     existing.groupId = targetGroupId;
     return true;
   }
@@ -61,7 +69,6 @@ function upsertDevice({ token, name, type, groupName, groupId }) {
     id: `dev-${Date.now()}-${groupDevices.value.length}`,
     name: name || `${props.labels.device || "Device"} ${groupDevices.value.length + 1}`,
     token: normalized,
-    type: type || importDeviceType.value,
     groupId: targetGroupId
   });
   return true;
@@ -81,7 +88,7 @@ function importTokens() {
     .map((line) => line.trim())
     .filter(Boolean);
   for (const line of lines) {
-    upsertDevice({ token: line, type: importDeviceType.value, groupId: selectedGroupId.value });
+    upsertDevice({ token: line, groupId: selectedGroupId.value });
   }
   tokenImportText.value = "";
 }
@@ -98,26 +105,30 @@ function groupNameById(groupId) {
   return deviceGroups.value.find((group) => group.id === groupId)?.name || "";
 }
 
+function groupVersionById(groupId) {
+  return deviceGroups.value.find((group) => group.id === groupId)?.version || "";
+}
+
 function exportDevicesExcel() {
   const rows = groupDevices.value.map((device) => ({
     name: device.name,
     token: device.token,
-    type: device.type,
-    group: groupNameById(device.groupId)
+    group: groupNameById(device.groupId),
+    version: groupVersionById(device.groupId)
   }));
   const body = rows.map((row) => `
     <tr>
       <td>${escapeHtml(row.name)}</td>
       <td>${escapeHtml(row.token)}</td>
-      <td>${escapeHtml(row.type)}</td>
       <td>${escapeHtml(row.group)}</td>
+      <td>${escapeHtml(row.version)}</td>
     </tr>`).join("");
   const html = `<!doctype html>
 <html>
 <head><meta charset="utf-8"></head>
 <body>
 <table>
-  <thead><tr><th>name</th><th>token</th><th>type</th><th>group</th></tr></thead>
+  <thead><tr><th>name</th><th>token</th><th>group</th><th>version</th></tr></thead>
   <tbody>${body}</tbody>
 </table>
 </body>
@@ -157,8 +168,8 @@ function parseCsvLine(line) {
 
 function importRows(rows) {
   for (const row of rows) {
-    const [name, token, type, group] = row;
-    upsertDevice({ name, token, type, groupName: group });
+    const [name, token, group, version] = row;
+    upsertDevice({ name, token, groupName: group, groupVersion: version });
   }
 }
 
@@ -188,6 +199,47 @@ async function importExcelFile(event) {
   if (/<table[\s>]/i.test(text)) importHtmlTable(text);
   else importCsv(text);
 }
+
+function onBatchFirmwareChange(event) {
+  batchFirmwareFile.value = event.target.files?.[0] || null;
+}
+
+async function createFlashJob(device) {
+  const data = new FormData();
+  data.set("firmwareFile", batchFirmwareFile.value);
+  data.set("deviceToken", device.token);
+  data.set("flashMode", batchFlashMode.value);
+  data.set("target", "stm32f4");
+  data.set("baseAddr", "0x08000000");
+  data.set("erase", "sector");
+  data.set("singlePacket", "0");
+  data.set("noResetAfterProgram", "0");
+  data.set("algoBlobPresent", "0");
+  const response = await fetch("/api/flash", { method: "POST", body: data });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : {};
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  return payload;
+}
+
+async function batchUpgradeGroup() {
+  if (!batchFirmwareFile.value || !selectedGroupDevices.value.length) return;
+  batchUpgrading.value = true;
+  batchResults.value = [];
+  for (const device of selectedGroupDevices.value) {
+    const row = { token: device.token, status: "running", message: "" };
+    batchResults.value.push(row);
+    try {
+      const payload = await createFlashJob(device);
+      row.status = "submitted";
+      row.message = payload.id || "";
+    } catch (err) {
+      row.status = "failed";
+      row.message = err.message;
+    }
+  }
+  batchUpgrading.value = false;
+}
 </script>
 
 <template>
@@ -202,7 +254,10 @@ async function importExcelFile(event) {
           :class="['group-item', selectedGroupId === group.id ? 'active' : '']"
           @click="selectedGroupId = group.id"
         >
-          <span class="font-medium">{{ group.name }}</span>
+          <span class="min-w-0">
+            <span class="block truncate font-medium">{{ group.name }}</span>
+            <span class="block truncate text-xs text-muted-foreground">{{ labels.groupVersion }}: {{ group.version || "-" }}</span>
+          </span>
           <span class="text-xs text-muted-foreground">{{ devicesInGroup(group.id).length }} {{ labels.devices }}</span>
         </button>
         <div class="space-y-2 border-t border-border pt-3">
@@ -226,29 +281,54 @@ async function importExcelFile(event) {
             </div>
           </div>
         </template>
-        <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_120px]">
+        <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px]">
           <el-input v-model="tokenImportText" type="textarea" :placeholder="labels.tokenImportPlaceholder" />
-          <el-select v-model="importDeviceType">
-            <el-option label="UART1" value="UART1" />
-            <el-option label="RS485" value="RS485" />
-            <el-option label="CAN" value="CAN" />
-          </el-select>
           <el-button type="primary" @click="importTokens">{{ labels.import }}</el-button>
+        </div>
+      </el-card>
+
+      <el-card class="control-card" shadow="never">
+        <template #header><span class="text-base font-semibold">{{ labels.groupUpgrade }}</span></template>
+        <div class="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)_160px]">
+          <el-input v-model="selectedGroup.version" :placeholder="labels.groupVersion" />
+          <input class="file-input" type="file" accept=".bin,.hex,application/octet-stream,text/plain" @change="onBatchFirmwareChange">
+          <el-button
+            type="primary"
+            :loading="batchUpgrading"
+            :disabled="!batchFirmwareFile || !selectedGroupDevices.length"
+            @click="batchUpgradeGroup"
+          >
+            {{ labels.batchUpgrade }}
+          </el-button>
+        </div>
+        <div class="mt-3 grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+          <el-select v-model="batchFlashMode">
+            <el-option label="SWD" value="swd" />
+            <el-option label="UART" value="uart" />
+            <el-option label="RS485" value="rs485" />
+          </el-select>
+          <div class="text-xs text-muted-foreground">{{ labels.groupUpgradeHint }}</div>
+        </div>
+        <div v-if="batchResults.length" class="mt-4 space-y-2 text-sm">
+          <div v-for="item in batchResults" :key="item.token" class="rounded-lg border border-border p-2">
+            <span class="font-mono">{{ item.token }}</span>
+            <span class="mx-2 text-muted-foreground">{{ item.status }}</span>
+            <span class="text-muted-foreground">{{ item.message }}</span>
+          </div>
         </div>
       </el-card>
 
       <el-card class="control-card" shadow="never">
         <template #header><span class="text-base font-semibold">{{ labels.groupDevices }}</span></template>
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <div v-for="device in devicesInGroup(selectedGroupId)" :key="device.id" class="device-card">
+          <div v-for="device in selectedGroupDevices" :key="device.id" class="device-card">
             <div class="font-medium">{{ device.name }}</div>
-            <div class="mt-1 text-xs text-muted-foreground">{{ device.type }}</div>
             <div class="mt-2 break-all font-mono text-xs">{{ device.token }}</div>
             <el-select v-model="device.groupId" class="mt-3">
               <el-option v-for="group in deviceGroups" :key="group.id" :label="group.name" :value="group.id" />
             </el-select>
           </div>
-          <div v-if="!devicesInGroup(selectedGroupId).length" class="text-sm text-muted-foreground">{{ labels.waiting }}</div>
+          <div v-if="!selectedGroupDevices.length" class="text-sm text-muted-foreground">{{ labels.waiting }}</div>
         </div>
       </el-card>
     </div>
