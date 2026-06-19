@@ -1,0 +1,1 @@
+.\dist-tools\PortVortexSerialForward.exe pv_c6a3ac6182728982 --mode uart --server http://localhost:3000 --auto-com0com
