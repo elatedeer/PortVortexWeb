@@ -27,6 +27,18 @@ except ImportError:
     serial = None
 
 
+def app_base_dir():
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def bundled_resource(*parts):
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS).joinpath(*parts)
+    return app_base_dir().joinpath(*parts)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="PortVortex serial forwarding bridge")
     parser.add_argument("key", help="Device ID / forwarding key")
@@ -84,12 +96,33 @@ def find_setupc(explicit=""):
                 str(Path(root) / "com0com" / "setupc.exe"),
             ])
     candidates.extend([
-        str(Path(__file__).resolve().parent / "com0com" / "setupc.exe"),
+        str(bundled_resource("com0com", "setupc.exe")),
+        str(app_base_dir() / "com0com" / "setupc.exe"),
         str(Path.cwd() / "tools" / "com0com" / "setupc.exe"),
     ])
     for item in candidates:
         if item and Path(item).exists():
             return str(Path(item))
+    return ""
+
+
+def find_com0com_installer(explicit=""):
+    candidates = []
+    if explicit:
+        candidates.append(explicit)
+    search_dirs = [
+        bundled_resource("com0com"),
+        app_base_dir() / "com0com",
+        Path.cwd() / "tools" / "com0com",
+    ]
+    for root in search_dirs:
+        if not root.exists():
+            continue
+        candidates.extend(sorted(root.glob("*.exe")))
+    for item in candidates:
+        path = Path(item)
+        if path.exists() and path.name.lower() != "setupc.exe":
+            return str(path)
     return ""
 
 
@@ -112,13 +145,15 @@ def launch_installer(installer):
 
 
 def run_setupc(setupc, *args):
+    setupc_path = Path(setupc)
     proc = subprocess.run(
-        [setupc, *args],
+        [str(setupc_path), *args],
         check=False,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
+        cwd=str(setupc_path.parent),
     )
     output = "\n".join(part for part in [proc.stdout, proc.stderr] if part).strip()
     if proc.returncode != 0:
@@ -219,11 +254,13 @@ def resolve_auto_com(args):
         print(f"com0com setupc.exe is already available: {setupc}")
         return None
     if not setupc:
-        if launch_installer(args.install_com0com):
+        installer = find_com0com_installer(args.install_com0com)
+        if launch_installer(installer):
             return None
         raise RuntimeError(
             "com0com setupc.exe was not found. Install com0com first, add setupc.exe to PATH, "
-            "pass --setupc C:\\path\\setupc.exe, or pass --install-com0com C:\\path\\installer.exe."
+            "put a com0com installer under tools\\com0com, pass --setupc C:\\path\\setupc.exe, "
+            "or pass --install-com0com C:\\path\\installer.exe."
         )
     if args.cleanup_com0com:
         remove_pair(setupc, pair_state_path)

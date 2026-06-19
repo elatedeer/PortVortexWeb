@@ -1,3 +1,5 @@
 node_modules
 .env
 vite*.log
+.venv-serial-forward/
+build/
