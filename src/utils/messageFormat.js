@@ -25,6 +25,35 @@ function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
+function textToUtf16LeBytes(value) {
+  const text = String(value || "");
+  const out = new Uint8Array(text.length * 2);
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    out[index * 2] = code & 0xff;
+    out[index * 2 + 1] = (code >> 8) & 0xff;
+  }
+  return out;
+}
+
+function utf16LeBytesToText(bytes) {
+  let text = "";
+  for (let index = 0; index + 1 < bytes.length; index += 2) {
+    text += String.fromCharCode(bytes[index] | (bytes[index + 1] << 8));
+  }
+  return text;
+}
+
+function swapPairs(bytes) {
+  const out = Uint8Array.from(bytes);
+  for (let index = 0; index + 1 < out.length; index += 2) {
+    const value = out[index];
+    out[index] = out[index + 1];
+    out[index + 1] = value;
+  }
+  return out;
+}
+
 function base64ToBytes(value) {
   const binary = atob(String(value || "").trim());
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
@@ -55,20 +84,15 @@ export function normalizeBase64Message(value) {
 
 export function normalizeUtf16BeMessage(value) {
   const raw = String(value || "");
-  const le = new TextEncoder("utf-16le").encode(raw);
-  for (let i = 0; i + 1 < le.length; i += 2) {
-    const a = le[i];
-    le[i] = le[i + 1];
-    le[i + 1] = a;
-  }
-  let binary = "";
-  for (const byte of le) binary += String.fromCharCode(byte);
-  return binary;
+  const le = textToUtf16LeBytes(raw);
+  const be = swapPairs(le);
+  return bytesToHex(be);
 }
 
 export function normalizeMessageForFormat(value, format) {
   if (format === "hex") return normalizeHexMessage(value);
   if (format === "base64") return normalizeBase64Message(value);
+  if (format === "unicode" || format === "utf16le") return bytesToHex(textToUtf16LeBytes(value));
   if (format === "utf16be") return normalizeUtf16BeMessage(value);
   return String(value || "");
 }
@@ -78,6 +102,8 @@ export function convertMessageFormat(value, fromFormat, toFormat) {
   try {
     if (fromFormat === "hex") text = bytesToText(hexToBytes(value));
     else if (fromFormat === "base64") text = bytesToText(base64ToBytes(value));
+    else if (fromFormat === "unicode" || fromFormat === "utf16le") text = utf16LeBytesToText(hexToBytes(value));
+    else if (fromFormat === "utf16be") text = utf16LeBytesToText(swapPairs(hexToBytes(value)));
   } catch (_) {
     text = String(value || "");
   }

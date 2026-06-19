@@ -95,10 +95,64 @@ function loadDeviceAuthStore() {
   return store;
 }
 
+function parseDeviceAuthText(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const params = new URLSearchParams(line.replace(/;/g, "&"));
+      const deviceId = String(params.get("device_id") || params.get("deviceId") || params.get("token") || "").trim();
+      const secret = String(params.get("secret") || params.get("device_secret") || params.get("deviceSecret") || "").trim().toLowerCase();
+      if (!/^[A-Za-z0-9_-]+$/.test(deviceId)) throw new Error(`invalid device_id: ${deviceId || line}`);
+      if (!/^[0-9a-f]{64}$/.test(secret)) throw new Error(`invalid secret for ${deviceId}`);
+      return { token: deviceId, device_id: deviceId, secret };
+    });
+}
+
+function loadDeviceAuthFile() {
+  if (!fs.existsSync(DEVICE_AUTH_FILE)) return { devices: [] };
+  const parsed = readJsonFile(DEVICE_AUTH_FILE);
+  if (Array.isArray(parsed.devices)) return { ...parsed, devices: parsed.devices };
+  if (parsed && typeof parsed === "object") {
+    const devices = [];
+    for (const [token, value] of Object.entries(parsed)) {
+      if (token === "devices") continue;
+      const secret = typeof value === "string" ? value : value?.secret || value?.device_secret || value?.deviceSecret;
+      if (secret) devices.push({ token, device_id: value?.device_id || value?.deviceId || token, secret });
+    }
+    return { devices };
+  }
+  return { devices: [] };
+}
+
+function importDeviceAuth(text, overwrite = false) {
+  const incoming = parseDeviceAuthText(text);
+  if (!incoming.length) throw new Error("device auth input is empty");
+  const store = loadDeviceAuthFile();
+  const devices = Array.isArray(store.devices) ? [...store.devices] : [];
+  const existingIds = new Set(devices.map((item) => String(item.device_id || item.deviceId || item.token || "").trim()).filter(Boolean));
+  const duplicates = incoming.filter((item) => existingIds.has(item.device_id)).map((item) => item.device_id);
+  if (duplicates.length && !overwrite) {
+    const err = new Error(`duplicate device_id: ${duplicates.join(", ")}`);
+    err.code = "DUPLICATE_DEVICE_AUTH";
+    err.duplicates = duplicates;
+    throw err;
+  }
+
+  const nextDevices = devices.filter((item) => {
+    const id = String(item.device_id || item.deviceId || item.token || "").trim();
+    return !incoming.some((entry) => entry.device_id === id);
+  });
+  nextDevices.push(...incoming);
+  fs.writeFileSync(DEVICE_AUTH_FILE, `${JSON.stringify({ ...store, devices: nextDevices }, null, 2)}\n`, "utf8");
+  return { imported: incoming.length, duplicates, devices: nextDevices.map((item) => item.device_id || item.token).filter(Boolean) };
+}
+
 function getDeviceSecret(deviceToken) {
   const token = String(deviceToken || "").trim();
   const store = loadDeviceAuthStore();
-  const entry = store[token] || store[`productid${token}`] || store.default;
+  const entry = store[token] || store.default;
   const secret = String(entry?.secret || "").trim();
   return /^[0-9a-fA-F]{64}$/.test(secret) ? secret.toLowerCase() : "";
 }
@@ -117,9 +171,10 @@ function appendSignedPayload(payload, topicSuffix, deviceToken) {
   const secret = getDeviceSecret(deviceToken);
   if (!secret) return text;
   const nonce = crypto.randomBytes(12).toString("hex");
-  const input = `${topicSuffix}\n\n${nonce}\n${text}`;
+  const payloadWithNonce = `${text}${text ? ";" : ""}nonce=${nonce}`;
+  const input = `${topicSuffix}\n\n${nonce}\n${payloadWithNonce}`;
   const sig = crypto.createHmac("sha256", Buffer.from(secret, "hex")).update(input).digest("hex");
-  return `${text}${text ? ";" : ""}nonce=${nonce};sig=${sig}`;
+  return `${payloadWithNonce};sig=${sig}`;
 }
 
 function normalizeTargetName(value) {
@@ -1040,12 +1095,12 @@ function replaceProfileToken(profile, key, value) {
 function normalizeDeviceToken(value) {
   const text = String(value || "").trim();
   if (!text) {
-    throw new Error("device token is required");
+    throw new Error("device id is required");
   }
-  const match = text.match(/productid([A-Za-z0-9_-]+)$/);
-  const token = match ? match[1] : text.replace(/^\/topic\/productid/, "");
+  const topicMatch = text.match(/^\/topic\/([A-Za-z0-9_-]+)(?:\/.*)?$/);
+  const token = topicMatch ? topicMatch[1] : text.replace(/^productid/, "");
   if (!/^[A-Za-z0-9_-]+$/.test(token)) {
-    throw new Error("device token can only contain letters, numbers, underscore, or dash");
+    throw new Error("device id can only contain letters, numbers, underscore, or dash");
   }
   return token;
 }
@@ -1058,7 +1113,7 @@ function mqttConfigFromParams(params) {
     username: DEFAULTS.mqttUsername,
     password: DEFAULTS.mqttPassword,
     deviceToken,
-    topicPrefix: `/topic/productid${deviceToken}`
+    topicPrefix: `/topic/${deviceToken}`
   };
 }
 
@@ -1088,8 +1143,14 @@ function normalizeMessageFormat(value) {
 function bufferFromMessage(message, format) {
   const text = String(message || "");
   if (format === "ascii" || format === "utf8") return Buffer.from(text, "utf8");
-  if (format === "unicode" || format === "utf16le") return Buffer.from(text, "utf16le");
+  if (format === "unicode" || format === "utf16le") {
+    const hexText = text.replace(/\s+/g, "");
+    if (/^[0-9a-fA-F]+$/.test(hexText) && hexText.length % 2 === 0) return Buffer.from(hexText, "hex");
+    return Buffer.from(text, "utf16le");
+  }
   if (format === "utf16be") {
+    const hexText = text.replace(/\s+/g, "");
+    if (/^[0-9a-fA-F]+$/.test(hexText) && hexText.length % 2 === 0) return Buffer.from(hexText, "hex");
     const le = Buffer.from(text, "utf16le");
     for (let i = 0; i + 1 < le.length; i += 2) {
       const a = le[i];
@@ -2191,6 +2252,18 @@ const server = http.createServer(async (req, res) => {
         config: buildClientChipConfig(config),
         meta: getMetaSnapshot()
       }), "application/json");
+    }
+    if (req.method === "POST" && url.pathname === "/api/device-auth/import") {
+      const body = await readJson(req);
+      try {
+        const result = importDeviceAuth(body.text || body.payload || "", body.overwrite === true || body.overwrite === "1");
+        return send(res, 200, JSON.stringify({ ok: true, ...result }), "application/json");
+      } catch (err) {
+        if (err.code === "DUPLICATE_DEVICE_AUTH") {
+          return send(res, 409, JSON.stringify({ error: err.message, duplicates: err.duplicates || [] }), "application/json");
+        }
+        throw err;
+      }
     }
     if (req.method === "POST" && url.pathname === "/api/offline/settings") {
       const body = await readJson(req);

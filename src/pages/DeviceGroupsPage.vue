@@ -16,6 +16,9 @@ const deviceGroups = ref([
 const selectedGroupId = ref("default");
 const newGroupName = ref("");
 const tokenImportText = ref("");
+const authImportText = ref("");
+const authImporting = ref(false);
+const authImportMessage = ref("");
 const groupDevices = ref([]);
 const batchFirmwareFile = ref(null);
 const batchFlashMode = ref("swd");
@@ -50,8 +53,8 @@ function ensureGroup(name, version = "") {
 function normalizeToken(value) {
   const text = String(value || "").trim();
   if (!text) return "";
-  const productMatch = text.match(/productid([A-Za-z0-9_-]+)$/);
-  const token = productMatch ? productMatch[1] : text.replace(/^\/topic\/productid/, "");
+  const topicMatch = text.match(/^\/topic\/([A-Za-z0-9_-]+)(?:\/.*)?$/);
+  const token = topicMatch ? topicMatch[1] : text.replace(/^productid/, "");
   return /^[A-Za-z0-9_-]+$/.test(token) ? token : "";
 }
 
@@ -93,6 +96,44 @@ function importTokens() {
   tokenImportText.value = "";
 }
 
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return { error: text };
+  }
+}
+
+async function submitDeviceAuthImport(overwrite = false) {
+  authImporting.value = true;
+  authImportMessage.value = "";
+  try {
+    const response = await fetch("/api/device-auth/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: authImportText.value, overwrite })
+    });
+    const payload = await readJsonResponse(response);
+    if (response.status === 409 && payload.duplicates?.length) {
+      const ok = window.confirm(`${props.labels.deviceAuthDuplicateConfirm}: ${payload.duplicates.join(", ")}`);
+      if (ok) return submitDeviceAuthImport(true);
+      authImportMessage.value = props.labels.deviceAuthDuplicateCanceled;
+      return null;
+    }
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    authImportMessage.value = `${props.labels.deviceAuthImported}: ${payload.imported || 0}`;
+    authImportText.value = "";
+    return payload;
+  } catch (err) {
+    authImportMessage.value = err.message;
+    return null;
+  } finally {
+    authImporting.value = false;
+  }
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -112,14 +153,14 @@ function groupVersionById(groupId) {
 function exportDevicesExcel() {
   const rows = groupDevices.value.map((device) => ({
     name: device.name,
-    token: device.token,
+    device_id: device.token,
     group: groupNameById(device.groupId),
     version: groupVersionById(device.groupId)
   }));
   const body = rows.map((row) => `
     <tr>
       <td>${escapeHtml(row.name)}</td>
-      <td>${escapeHtml(row.token)}</td>
+      <td>${escapeHtml(row.device_id)}</td>
       <td>${escapeHtml(row.group)}</td>
       <td>${escapeHtml(row.version)}</td>
     </tr>`).join("");
@@ -128,7 +169,7 @@ function exportDevicesExcel() {
 <head><meta charset="utf-8"></head>
 <body>
 <table>
-  <thead><tr><th>name</th><th>token</th><th>group</th><th>version</th></tr></thead>
+  <thead><tr><th>name</th><th>device_id</th><th>group</th><th>version</th></tr></thead>
   <tbody>${body}</tbody>
 </table>
 </body>
@@ -187,7 +228,7 @@ function importCsv(text) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map(parseCsvLine)
-    .filter((cells) => cells.length >= 2 && cells[1] !== "token");
+    .filter((cells) => cells.length >= 2 && !["token", "device_id"].includes(String(cells[1] || "").toLowerCase()));
   importRows(rows);
 }
 
@@ -286,6 +327,18 @@ async function batchUpgradeGroup() {
         <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px]">
           <el-input v-model="tokenImportText" type="textarea" :placeholder="labels.tokenImportPlaceholder" />
           <el-button type="primary" @click="importTokens">{{ labels.import }}</el-button>
+        </div>
+      </el-card>
+
+      <el-card class="control-card" shadow="never">
+        <template #header><span class="text-base font-semibold">{{ labels.deviceAuthImport }}</span></template>
+        <div class="space-y-3">
+          <div class="text-xs text-muted-foreground">{{ labels.deviceAuthImportHint }}</div>
+          <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px]">
+            <el-input v-model="authImportText" type="textarea" :placeholder="labels.deviceAuthImportPlaceholder" />
+            <el-button type="primary" :loading="authImporting" @click="submitDeviceAuthImport(false)">{{ labels.import }}</el-button>
+          </div>
+          <div v-if="authImportMessage" class="text-sm text-muted-foreground">{{ authImportMessage }}</div>
         </div>
       </el-card>
 

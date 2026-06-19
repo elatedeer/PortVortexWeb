@@ -151,7 +151,7 @@
                     >
                       <template #append>
                         <el-tooltip :content="t.deviceTokenHelp" placement="top" effect="light">
-                          <button class="token-help-button" type="button" aria-label="Device token help">?</button>
+                          <button class="token-help-button" type="button" aria-label="Device ID help">?</button>
                         </el-tooltip>
                       </template>
                     </el-autocomplete>
@@ -355,7 +355,7 @@
                 >
                   <template #append>
                     <el-tooltip :content="t.deviceTokenHelp" placement="top" effect="light">
-                      <button class="token-help-button" type="button" aria-label="Device token help">?</button>
+                      <button class="token-help-button" type="button" aria-label="Device ID help">?</button>
                     </el-tooltip>
                   </template>
                 </el-autocomplete>
@@ -413,7 +413,7 @@
                 >
                   <template #append>
                     <el-tooltip :content="t.deviceTokenHelp" placement="top" effect="light">
-                      <button class="token-help-button" type="button" aria-label="Device token help">?</button>
+                      <button class="token-help-button" type="button" aria-label="Device ID help">?</button>
                     </el-tooltip>
                   </template>
                 </el-autocomplete>
@@ -1393,6 +1393,46 @@ Object.assign(copy.en, {
   comingSoon: "Coming soon"
 });
 
+Object.assign(copy.zh, {
+  deviceToken: "设备 ID",
+  deviceTokenHelp: "设备 ID 可从固件 AT+AUTH?、设备标签或设备管理信息中获取；MQTT 主题使用 /topic/设备ID 生成。",
+  headerHint: "输入设备 ID 后，系统自动补全 MQTT 连接与主题。",
+  mqttHidden: "MQTT broker、账号、密码、QoS 和主题前缀均由设备 ID 自动生成。",
+  importByToken: "按设备 ID 导入设备",
+  tokenImportPlaceholder: "每行一个设备 ID，也可以粘贴 /topic/<设备ID>/qos1 这类完整主题。",
+  groupUpgradeHint: "使用选择的固件，按当前分组内的设备 ID 逐个提交升级任务。",
+  tokenHistory: "设备 ID 历史",
+  tokenHistoryHint: "读取本机保存过的设备 ID 连接记录，可一键应用到下载和实时通信。",
+  noTokenHistory: "暂无设备 ID 历史记录",
+  useToken: "使用",
+  deviceAuthImport: "手动导入设备密钥",
+  deviceAuthImportHint: "粘贴固件端生成的 device_id 和 secret。device_id 将作为页面中的设备 ID 使用，并用于签名密钥匹配。",
+  deviceAuthImportPlaceholder: "device_id=pv_c6a3ac6182728982;secret=c06a4e4bc06d96d0cc77cc7320df110f7dc26cc7658eb104d4b7833de8aa5b81",
+  deviceAuthImported: "密钥导入成功",
+  deviceAuthDuplicateConfirm: "以下 device_id 已存在，是否覆盖",
+  deviceAuthDuplicateCanceled: "已取消覆盖"
+});
+
+Object.assign(copy.en, {
+  deviceToken: "Device ID",
+  deviceTokenHelp: "Find the device ID from firmware AT+AUTH?, the device label, or device management data. MQTT topics use /topic/<device_id>.",
+  headerHint: "Enter the device ID; MQTT connection and topics are generated automatically.",
+  mqttHidden: "MQTT broker, account, password, QoS, and topic prefix are generated from the device ID.",
+  importByToken: "Import devices by ID",
+  tokenImportPlaceholder: "One device ID per line. Full topics such as /topic/<device_id>/qos1 are also supported.",
+  groupUpgradeHint: "Submit upgrade jobs one by one for every device ID in the selected group.",
+  tokenHistory: "Device ID History",
+  tokenHistoryHint: "Read saved device ID connection records on this browser and apply them quickly.",
+  noTokenHistory: "No device ID history yet",
+  useToken: "Use",
+  deviceAuthImport: "Manual Device Secret Import",
+  deviceAuthImportHint: "Paste the device_id and secret generated for firmware auth. device_id is used as the page device ID and for signing key lookup.",
+  deviceAuthImportPlaceholder: "device_id=pv_c6a3ac6182728982;secret=c06a4e4bc06d96d0cc77cc7320df110f7dc26cc7658eb104d4b7833de8aa5b81",
+  deviceAuthImported: "Device secret imported",
+  deviceAuthDuplicateConfirm: "These device_id values already exist. Overwrite them",
+  deviceAuthDuplicateCanceled: "Overwrite canceled"
+});
+
 const t = computed(() => copy[lang.value]);
 const pageTitle = computed(() => {
   if (currentPage.value === "profile") return t.value.profile;
@@ -1575,7 +1615,7 @@ function applyTokenHistory(token) {
   chatDeviceToken.value = next;
   saveDeviceTokenHistory(next, "history");
   syncChatTopics();
-  showToast(lang.value === "zh" ? "已应用 Token" : "Token applied", "success");
+  showToast(lang.value === "zh" ? "已应用设备 ID" : "Device ID applied", "success");
 }
 
 function createChannelState(key, subscribeTopic, publishTopic, target) {
@@ -1608,12 +1648,12 @@ function createChannelState(key, subscribeTopic, publishTopic, target) {
 
 function syncChatTopics() {
   const token = String(chatDeviceToken.value || "").trim();
-  channels.general.subscribeTopic = `/topic/productid${token}/qos1`;
-  channels.general.publishTopic = `/topic/productid${token}/qos0`;
-  channels.rs485.subscribeTopic = `/topic/productid${token}/rs485/qos1`;
-  channels.rs485.publishTopic = `/topic/productid${token}/rs485/qos0`;
-  channels.can.subscribeTopic = `/topic/productid${token}/can/qos1`;
-  channels.can.publishTopic = `/topic/productid${token}/can/qos0`;
+  channels.general.subscribeTopic = `/topic/${token}/qos1`;
+  channels.general.publishTopic = `/topic/${token}/qos0`;
+  channels.rs485.subscribeTopic = `/topic/${token}/rs485/qos1`;
+  channels.rs485.publishTopic = `/topic/${token}/rs485/qos0`;
+  channels.can.subscribeTopic = `/topic/${token}/can/qos1`;
+  channels.can.publishTopic = `/topic/${token}/can/qos0`;
 }
 
 syncChatTopics();
@@ -2034,7 +2074,7 @@ function appendFormValue(data, key, value) {
 
 function requireDeviceToken(token) {
   if (String(token || "").trim()) return true;
-  showToast(lang.value === "zh" ? "请输入设备 Token" : "Device token is required", "error");
+  showToast(lang.value === "zh" ? "请输入设备 ID" : "Device ID is required", "error");
   return false;
 }
 

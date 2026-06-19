@@ -210,7 +210,7 @@ import CheckboxCompat from "./shadcn-compat/ElCheckbox.vue";
 import SelectItem from "./shadcn-compat/ElOption.vue";
 import ElDropdown from "./shadcn-compat/ElDropdown.vue";
 import ElIcon from "./shadcn-compat/ElIcon.vue";
-import { normalizeMessageForFormat } from "../utils/messageFormat";
+import { convertMessageFormat } from "../utils/messageFormat";
 
 const props = defineProps({
   channel: { type: Object, required: true },
@@ -226,7 +226,9 @@ function onFileChange(event) {
 
 function changeSendFormat(value) {
   if (props.channel.sendFormat === value) return;
+  props.channel.message = convertMessageFormat(props.channel.message, props.channel.sendFormat, value);
   props.channel.sendFormat = value;
+  emit("format-change");
 }
 
 function changeReceiveFormat(value) {
