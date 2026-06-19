@@ -15,13 +15,13 @@
         </div>
       </div>
 
-      <nav class="flex-1 space-y-1 px-3 py-3">
+      <nav class="flex-1 space-y-0.5 px-3 py-2">
         <button
           v-for="item in sideNav"
           :key="item.key"
           :title="collapsed ? item.label : undefined"
           :aria-label="item.label"
-          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition"
+          class="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition"
           :class="[
             currentPage === item.key
               ? 'bg-sidebar-primary text-sidebar-primary-foreground'
@@ -35,11 +35,11 @@
         </button>
       </nav>
 
-      <div class="space-y-2 px-3 pb-4">
+      <div class="space-y-1 px-3 pb-3">
         <button
           :title="collapsed ? t.helpDocs : undefined"
           :aria-label="t.helpDocs"
-          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          class="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           @click="openHelp"
         >
           <el-icon class="sidebar-icon"><QuestionFilled /></el-icon>
@@ -48,7 +48,7 @@
         <button
           :title="collapsed ? t.collapse : undefined"
           :aria-label="t.collapse"
-          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          class="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           @click="collapsed = !collapsed"
         >
           <el-icon class="sidebar-icon"><component :is="collapsed ? Expand : Fold" /></el-icon>
@@ -375,7 +375,10 @@
                 <template #header>
                   <div class="flex items-center justify-between gap-3">
                     <span class="text-base font-semibold">{{ t.rs485Chat }}</span>
-                    <el-button :loading="serialLoading === 'rs485'" @click="openSerialConfig('rs485')">{{ t.serialConfig }}</el-button>
+                    <div class="flex items-center gap-2">
+                      <el-button :loading="modbusLoading" @click="openModbusConfig">{{ t.modbusConfig }}</el-button>
+                      <el-button :loading="serialLoading === 'rs485'" @click="openSerialConfig('rs485')">{{ t.serialConfig }}</el-button>
+                    </div>
                   </div>
                 </template>
                 <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @file-send="sendChannelFile('rs485')" @clear="clearChannel('rs485')" @format-change="persistChatFormat('rs485')" @timer-change="syncTimedSend('rs485')" />
@@ -447,6 +450,31 @@
             @remove="removeDeviceTokenHistory"
             @clear="clearDeviceTokenHistory"
           />
+        </template>
+
+        <template v-else-if="currentPage === 'aiAssistant'">
+          <section class="space-y-5">
+            <el-card class="control-card" shadow="never">
+              <template #header>
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-base font-semibold">{{ t.aiAssistant }}</div>
+                    <div class="text-xs text-slate-500">{{ t.aiAssistantHint }}</div>
+                  </div>
+                  <el-tag type="info" effect="light">{{ t.comingSoon }}</el-tag>
+                </div>
+              </template>
+              <div class="ai-placeholder">
+                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                  <el-icon size="22"><ChatDotRound /></el-icon>
+                </div>
+                <div class="min-w-0">
+                  <div class="text-sm font-semibold">{{ t.aiAssistantEmptyTitle }}</div>
+                  <div class="mt-1 text-sm text-muted-foreground">{{ t.aiAssistantEmptyHint }}</div>
+                </div>
+              </div>
+            </el-card>
+          </section>
         </template>
 
         <template v-else-if="currentPage === 'feedback'">
@@ -715,6 +743,110 @@
         </div>
       </div>
     </div>
+    <div v-if="modbusDialogVisible" class="modal-backdrop" @click.self="modbusDialogVisible = false">
+      <div class="serial-dialog">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <div class="text-lg font-semibold">{{ t.modbusConfig }}</div>
+            <div class="mt-1 text-xs text-muted-foreground">{{ t.modbusHint }}</div>
+          </div>
+          <button class="quick-menu-button" type="button" :title="t.close" @click="modbusDialogVisible = false">x</button>
+        </div>
+
+        <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          <div class="serial-config-panel">
+            <div class="text-sm font-semibold">{{ t.modbusMode }}</div>
+            <div class="mt-2 space-y-2 text-xs text-muted-foreground">
+              <div><span class="font-medium text-foreground">{{ t.modbusBridge }}</span> - {{ t.modbusBridgeHelp }}</div>
+              <div><span class="font-medium text-foreground">{{ t.modbusSlave }}</span> - {{ t.modbusSlaveHelp }}</div>
+              <div><span class="font-medium text-foreground">{{ t.modbusMaster }}</span> - {{ t.modbusMasterHelp }}</div>
+            </div>
+            <div class="mt-4 grid gap-3">
+              <div class="field-block">
+                <div class="field-label">{{ t.modbusMode }}</div>
+                <el-select v-model="modbusForm.mode">
+                  <el-option :label="t.modbusBridge" value="bridge" />
+                  <el-option :label="t.modbusSlave" value="modbus_slave" />
+                  <el-option :label="t.modbusMaster" value="modbus_master" />
+                </el-select>
+              </div>
+              <div v-if="modbusForm.mode === 'modbus_slave'" class="field-block">
+                <div class="field-label">{{ t.modbusAddr }}</div>
+                <el-input-number v-model="modbusForm.addr" :min="1" :max="247" />
+              </div>
+              <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                {{ t.modbusModeWarning }}
+              </div>
+              <div class="flex justify-between gap-2">
+                <el-button :loading="modbusLoading" @click="loadModbusConfig">{{ t.refresh }}</el-button>
+                <el-button type="primary" :loading="modbusSaving" @click="saveModbusConfig">{{ t.save }}</el-button>
+              </div>
+            </div>
+          </div>
+
+          <div class="serial-config-panel">
+            <div class="flex items-center justify-between gap-3">
+              <div class="text-sm font-semibold">{{ t.modbusPolls }}</div>
+              <el-button :loading="modbusPollSaving" @click="clearModbusPolls">{{ t.clear }}</el-button>
+            </div>
+            <div class="mt-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">
+              {{ t.modbusPollHelp }}
+            </div>
+            <div class="mt-4 grid gap-3 sm:grid-cols-2">
+              <div class="field-block">
+                <div class="field-label">{{ t.name }}</div>
+                <el-input v-model="modbusPollForm.name" />
+              </div>
+              <div class="field-block">
+                <div class="field-label">{{ t.modbusSlaveId }}</div>
+                <el-input-number v-model="modbusPollForm.slave" :min="1" :max="247" />
+              </div>
+              <div class="field-block">
+                <div class="field-label">FC</div>
+                <el-select v-model="modbusPollForm.fc">
+                  <el-option label="1 Coil" :value="1" />
+                  <el-option label="2 Discrete Input" :value="2" />
+                  <el-option label="3 Holding Register" :value="3" />
+                  <el-option label="4 Input Register" :value="4" />
+                </el-select>
+              </div>
+              <div class="field-block">
+                <div class="field-label">{{ t.modbusRegisterAddr }}</div>
+                <el-input-number v-model="modbusPollForm.addr" :min="0" :max="65535" />
+              </div>
+              <div class="field-block">
+                <div class="field-label">{{ t.modbusQuantity }}</div>
+                <el-input-number v-model="modbusPollForm.qty" :min="1" :max="125" />
+              </div>
+              <div class="field-block">
+                <div class="field-label">{{ t.modbusInterval }}</div>
+                <el-input-number v-model="modbusPollForm.interval" :min="100" :max="86400000" />
+              </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+              <el-button type="primary" :loading="modbusPollSaving" @click="addModbusPoll">{{ t.modbusAddPoll }}</el-button>
+            </div>
+            <div class="mt-4 space-y-2">
+              <div v-for="poll in modbusPolls" :key="poll.name" class="modbus-poll-row">
+                <div class="min-w-0">
+                  <div class="truncate text-sm font-medium">{{ poll.name }}</div>
+                  <div class="text-xs text-muted-foreground">slave={{ poll.slave }};fc={{ poll.fc }};addr={{ poll.addr }};qty={{ poll.qty }};interval={{ poll.interval }}</div>
+                </div>
+                <el-button :loading="modbusPollSaving" @click="deleteModbusPoll(poll.name)">{{ t.delete }}</el-button>
+              </div>
+              <div v-if="!modbusPolls.length" class="rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">{{ t.modbusNoPolls }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="modbusStatusText" class="mt-4 rounded-lg border border-border bg-muted p-3 text-xs text-muted-foreground">
+          {{ modbusStatusText }}
+        </div>
+        <div class="mt-4 flex justify-end">
+          <el-button @click="modbusDialogVisible = false">{{ t.close }}</el-button>
+        </div>
+      </div>
+    </div>
     <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2">
       <div
         v-for="toast in toasts"
@@ -796,6 +928,11 @@ const serialLoading = ref("");
 const serialSaving = ref("");
 const serialDialogVisible = reactive({ uart1: false, rs485: false });
 const canConfigSaving = ref(false);
+const modbusDialogVisible = ref(false);
+const modbusLoading = ref(false);
+const modbusSaving = ref(false);
+const modbusPollSaving = ref(false);
+const modbusStatusText = ref("");
 const meta = reactive({ firmwareVersion: "v1.0.0", onlineEngineerCount: 1, deviceOnline: false });
 const toasts = ref([]);
 let chatMessageSeq = 0;
@@ -814,6 +951,9 @@ const serialForms = reactive({
 const baudRateOptions = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 1500000, 2000000];
 const canBitrateOptions = [50000, 100000, 125000, 250000, 500000, 800000, 1000000];
 const canConfig = reactive({ bitrate: 500000 });
+const modbusForm = reactive({ mode: "bridge", addr: 1 });
+const modbusPollForm = reactive({ name: "meter1", slave: 1, fc: 4, addr: 0, qty: 1, interval: 1000 });
+const modbusPolls = ref([]);
 const serialPorts = [
   { key: "uart1", label: "UART1", kind: "serial" },
   { key: "rs485", label: "RS485", kind: "serial" }
@@ -1189,6 +1329,70 @@ Object.assign(copy.en, {
   clear: "Clear"
 });
 
+Object.assign(copy.zh, {
+  modbusConfig: "Modbus配置",
+  modbusHint: "Modbus模式会暂停RS485透明转发，切回bridge后恢复。",
+  modbusMode: "Modbus模式",
+  modbusBridge: "透明桥接",
+  modbusSlave: "RTU从站",
+  modbusMaster: "RTU主站",
+  modbusBridgeHelp: "普通RS485收发，实时对话可直接发送和接收。",
+  modbusSlaveHelp: "本设备作为从站，供PLC或上位机读取ADC、继电器等数据。",
+  modbusMasterHelp: "本设备作为主站，按设定周期自动读取电表、传感器或PLC。",
+  modbusAddr: "从站地址",
+  modbusModeWarning: "modbus_slave 或 modbus_master 模式下，RS485实时对话透明转发会暂停。",
+  modbusPolls: "主站自动读取任务",
+  modbusPollHelp: "仅RTU主站模式需要配置。示例：每1000ms读取从站1的输入寄存器0，数量1。",
+  modbusSlaveId: "从站ID",
+  modbusRegisterAddr: "寄存器地址",
+  modbusQuantity: "数量",
+  modbusInterval: "间隔(ms)",
+  modbusAddPoll: "添加轮询",
+  modbusNoPolls: "暂无轮询项",
+  modbusSaved: "Modbus配置已保存",
+  modbusPollSaved: "Modbus轮询已更新"
+});
+
+Object.assign(copy.en, {
+  modbusConfig: "Modbus Config",
+  modbusHint: "Modbus modes pause transparent RS485 forwarding. Switch back to bridge to restore RS485 chat.",
+  modbusMode: "Modbus mode",
+  modbusBridge: "Bridge",
+  modbusSlave: "RTU Slave",
+  modbusMaster: "RTU Master",
+  modbusBridgeHelp: "Normal RS485 passthrough. Live chat sends and receives raw RS485 data.",
+  modbusSlaveHelp: "This device acts as a slave for a PLC or host to read ADC, relay, and status data.",
+  modbusMasterHelp: "This device acts as a master and reads meters, sensors, or PLCs on a schedule.",
+  modbusAddr: "Slave address",
+  modbusModeWarning: "RS485 transparent chat is paused while mode is modbus_slave or modbus_master.",
+  modbusPolls: "Master auto-read tasks",
+  modbusPollHelp: "Only needed in RTU Master mode. Example: read slave 1 input register 0, quantity 1, every 1000 ms.",
+  modbusSlaveId: "Slave ID",
+  modbusRegisterAddr: "Register address",
+  modbusQuantity: "Quantity",
+  modbusInterval: "Interval (ms)",
+  modbusAddPoll: "Add poll",
+  modbusNoPolls: "No poll items yet",
+  modbusSaved: "Modbus config saved",
+  modbusPollSaved: "Modbus poll updated"
+});
+
+Object.assign(copy.zh, {
+  aiAssistant: "AI助手",
+  aiAssistantHint: "设备诊断、协议说明和升级辅助入口。",
+  aiAssistantEmptyTitle: "AI助手暂未启用",
+  aiAssistantEmptyHint: "后续可在这里接入设备问答、日志分析和固件升级建议。",
+  comingSoon: "即将开放"
+});
+
+Object.assign(copy.en, {
+  aiAssistant: "AI Assistant",
+  aiAssistantHint: "Entry for device diagnosis, protocol help, and upgrade assistance.",
+  aiAssistantEmptyTitle: "AI Assistant is not enabled yet",
+  aiAssistantEmptyHint: "Device Q&A, log analysis, and firmware upgrade suggestions can be added here later.",
+  comingSoon: "Coming soon"
+});
+
 const t = computed(() => copy[lang.value]);
 const pageTitle = computed(() => {
   if (currentPage.value === "profile") return t.value.profile;
@@ -1196,6 +1400,7 @@ const pageTitle = computed(() => {
   if (currentPage.value === "can") return t.value.canChat;
   if (currentPage.value === "groups") return t.value.deviceGroups;
   if (currentPage.value === "tokenHistory") return t.value.tokenHistory;
+  if (currentPage.value === "aiAssistant") return t.value.aiAssistant;
   if (currentPage.value === "feedback") return t.value.feedback;
   if (currentPage.value === "logs") return t.value.logs;
   return t.value.title;
@@ -1281,6 +1486,7 @@ const sideNav = computed(() => [
   { key: "can", label: t.value.canChat, icon: Connection },
   { key: "groups", label: t.value.deviceGroups, icon: House },
   { key: "tokenHistory", label: t.value.tokenHistory, icon: Document },
+  { key: "aiAssistant", label: t.value.aiAssistant, icon: ChatDotRound },
   { key: "feedback", label: t.value.feedback, icon: Promotion },
   { key: "logs", label: t.value.logs, icon: Document },
   { key: "profile", label: t.value.profile, icon: UserFilled }
@@ -1658,6 +1864,126 @@ async function saveSerialConfig(port) {
     showToast(err.message, "error");
   } finally {
     serialSaving.value = "";
+  }
+}
+
+function syncModbusAck(ack = {}) {
+  modbusStatusText.value = Object.entries(ack).map(([key, value]) => `${key}=${value}`).join(";");
+  if (ack.mode) modbusForm.mode = String(ack.mode);
+  if (ack.addr) modbusForm.addr = Number(ack.addr) || 1;
+  const polls = [];
+  for (let index = 0; index < 4; index += 1) {
+    const prefix = `poll${index}_`;
+    const name = ack[`${prefix}name`] || ack[`poll_${index}_name`];
+    if (!name) continue;
+    polls.push({
+      name,
+      slave: Number(ack[`${prefix}slave`] || ack[`poll_${index}_slave`] || 1),
+      fc: Number(ack[`${prefix}fc`] || ack[`poll_${index}_fc`] || 4),
+      addr: Number(ack[`${prefix}addr`] || ack[`poll_${index}_addr`] || 0),
+      qty: Number(ack[`${prefix}qty`] || ack[`poll_${index}_qty`] || 1),
+      interval: Number(ack[`${prefix}interval`] || ack[`poll_${index}_interval`] || 1000)
+    });
+  }
+  if (polls.length) modbusPolls.value = polls;
+}
+
+async function loadModbusConfig() {
+  if (!requireDeviceToken(chatDeviceToken.value)) return;
+  modbusLoading.value = true;
+  try {
+    const query = new URLSearchParams({ deviceToken: chatDeviceToken.value });
+    const response = await fetch(`/api/modbus?${query}`);
+    const payload = await readJsonResponse(response, "Load Modbus config failed");
+    if (!response.ok) throw new Error(payload.error || "Modbus config load failed");
+    syncModbusAck(payload.ack || {});
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    modbusLoading.value = false;
+  }
+}
+
+async function openModbusConfig() {
+  modbusDialogVisible.value = true;
+  await loadModbusConfig();
+}
+
+async function saveModbusConfig() {
+  if (!requireDeviceToken(chatDeviceToken.value)) return;
+  modbusSaving.value = true;
+  try {
+    const body = {
+      deviceToken: chatDeviceToken.value,
+      mode: modbusForm.mode,
+      addr: modbusForm.addr
+    };
+    const response = await fetch("/api/modbus", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const payload = await readJsonResponse(response, "Save Modbus config failed");
+    if (!response.ok) throw new Error(payload.error || "Modbus config save failed");
+    syncModbusAck(payload.ack || {});
+    showToast(t.value.modbusSaved, "success");
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    modbusSaving.value = false;
+  }
+}
+
+async function postModbusPoll(body) {
+  if (!requireDeviceToken(chatDeviceToken.value)) return null;
+  const response = await fetch("/api/modbus/poll", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceToken: chatDeviceToken.value, ...body })
+  });
+  const payload = await readJsonResponse(response, "Save Modbus poll failed");
+  if (!response.ok) throw new Error(payload.error || "Modbus poll save failed");
+  syncModbusAck(payload.ack || {});
+  return payload;
+}
+
+async function addModbusPoll() {
+  modbusPollSaving.value = true;
+  try {
+    await postModbusPoll({ action: "add", ...modbusPollForm });
+    const next = { ...modbusPollForm };
+    modbusPolls.value = [next, ...modbusPolls.value.filter((item) => item.name !== next.name)].slice(0, 4);
+    showToast(t.value.modbusPollSaved, "success");
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    modbusPollSaving.value = false;
+  }
+}
+
+async function deleteModbusPoll(name) {
+  modbusPollSaving.value = true;
+  try {
+    await postModbusPoll({ action: "delete", name });
+    modbusPolls.value = modbusPolls.value.filter((item) => item.name !== name);
+    showToast(t.value.modbusPollSaved, "success");
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    modbusPollSaving.value = false;
+  }
+}
+
+async function clearModbusPolls() {
+  modbusPollSaving.value = true;
+  try {
+    await postModbusPoll({ action: "clear" });
+    modbusPolls.value = [];
+    showToast(t.value.modbusPollSaved, "success");
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    modbusPollSaving.value = false;
   }
 }
 

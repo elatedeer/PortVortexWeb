@@ -15,6 +15,7 @@ const CHIP_CONFIG_DIR = path.join(__dirname, "chip-configs");
 const DEVICE_AUTH_FILE = path.join(__dirname, "device-auth.json");
 const SIGNED_TOPIC_SUFFIXES = new Set([
   "/set",
+  "/modbus/set",
   "/target",
   "/uartflash/target",
   "/job",
@@ -1137,7 +1138,7 @@ function normalizeChatTarget(value, publishTopic = "") {
 
 function isReadOnlyDeviceTopic(topic) {
   const text = String(topic || "").toLowerCase();
-  return /\/(qos1|set\/ack|algo\/ack|hex\/ack|bin\/ack|uartflash\/ack)$/.test(text);
+  return /\/(qos1|set\/ack|algo\/ack|hex\/ack|bin\/ack|uartflash\/ack|modbus\/ack)$/.test(text);
 }
 
 function normalizeSerialPort(value) {
@@ -1287,6 +1288,29 @@ async function publishGetAndWait(params, payload) {
   }
 }
 
+async function publishModbusAndWait(params, suffix, payload) {
+  const mqtt = mqttConfigFromParams(params);
+  const topic = topicWithDevicePrefix(`/modbus/${suffix}`, mqtt.topicPrefix);
+  const ackTopic = topicWithDevicePrefix("/modbus/ack", mqtt.topicPrefix);
+  const nonce = crypto.randomBytes(2).toString("hex");
+  const client = new MqttClient(
+    mqtt.broker,
+    mqtt.port,
+    `web-modbus-${suffix}-${nonce}`,
+    mqtt.username,
+    mqtt.password
+  );
+
+  try {
+    await client.connect();
+    await client.subscribe(ackTopic, 0);
+    await publishDeviceCommand(client, topic, payload, 0, mqtt);
+    return parseAck(await client.waitForMessage(ackTopic, Number(params.ackTimeout || DEFAULTS.ackTimeout)));
+  } finally {
+    client.disconnect();
+  }
+}
+
 async function applyOfflineSettings(params) {
   const channel = params.flashMode === "swd" ? "SWD" : "UART";
   const payload = offlineAutoPayload(params);
@@ -1313,6 +1337,73 @@ function adcQueryPayload(params = {}) {
 
 async function queryAdc(params) {
   return publishGetAndWait(params, adcQueryPayload(params));
+}
+
+function normalizeModbusMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  if (!["bridge", "modbus_slave", "modbus_master"].includes(mode)) {
+    throw new Error("mode must be bridge, modbus_slave, or modbus_master");
+  }
+  return mode;
+}
+
+function normalizeModbusAddress(value) {
+  const addr = Number.parseInt(String(value || "").trim(), 10);
+  if (!Number.isInteger(addr) || addr < 1 || addr > 247) throw new Error("addr must be 1-247");
+  return String(addr);
+}
+
+function normalizeModbusPollNumber(value, key, min, max) {
+  const number = Number.parseInt(String(value || "").trim(), 10);
+  if (!Number.isInteger(number) || number < min || number > max) throw new Error(`${key} must be ${min}-${max}`);
+  return String(number);
+}
+
+function normalizeModbusPollName(value) {
+  const name = String(value || "").trim();
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) throw new Error("name must be 1-32 letters, numbers, underscore, or dash");
+  return name;
+}
+
+function modbusConfigPayload(body = {}) {
+  const mode = normalizeModbusMode(body.mode);
+  const parts = [`mode=${mode}`];
+  if (mode === "modbus_slave" || body.addr !== undefined) {
+    parts.push(`addr=${normalizeModbusAddress(body.addr || 1)}`);
+  }
+  return parts.join(";");
+}
+
+function modbusPollPayload(body = {}) {
+  const action = String(body.action || "").trim().toLowerCase();
+  if (action === "clear") return "action=clear";
+  if (action === "delete") return `action=delete;name=${normalizeModbusPollName(body.name)}`;
+  if (action !== "add") throw new Error("action must be add, delete, or clear");
+  return [
+    "action=add",
+    `name=${normalizeModbusPollName(body.name)}`,
+    `slave=${normalizeModbusPollNumber(body.slave, "slave", 1, 247)}`,
+    `fc=${normalizeModbusPollNumber(body.fc, "fc", 1, 4)}`,
+    `addr=${normalizeModbusPollNumber(body.addr, "addr", 0, 65535)}`,
+    `qty=${normalizeModbusPollNumber(body.qty, "qty", 1, 125)}`,
+    `interval=${normalizeModbusPollNumber(body.interval, "interval", 100, 86400000)}`
+  ].join(";");
+}
+
+async function queryModbus(params) {
+  return publishModbusAndWait(params, "get", "status=?");
+}
+
+async function applyModbusConfig(params) {
+  const payload = modbusConfigPayload(params);
+  const ack = await publishModbusAndWait(params, "set", payload);
+  return { payload, ack };
+}
+
+async function applyModbusPoll(params) {
+  const payload = modbusPollPayload(params);
+  const ack = await publishModbusAndWait(params, "set", payload);
+  return { payload, ack };
 }
 
 async function applyRelay(params, target) {
@@ -2119,6 +2210,21 @@ const server = http.createServer(async (req, res) => {
         : await readJson(req);
       const result = await applyRelay(params, target);
       return send(res, 200, JSON.stringify({ ok: true, target, ...result }), "application/json");
+    }
+    if (req.method === "GET" && url.pathname === "/api/modbus") {
+      const params = Object.fromEntries(url.searchParams.entries());
+      const ack = await queryModbus(params);
+      return send(res, 200, JSON.stringify({ ok: true, payload: "status=?", ack }), "application/json");
+    }
+    if (req.method === "POST" && url.pathname === "/api/modbus") {
+      const body = await readJson(req);
+      const result = await applyModbusConfig(body);
+      return send(res, 200, JSON.stringify({ ok: true, ...result }), "application/json");
+    }
+    if (req.method === "POST" && url.pathname === "/api/modbus/poll") {
+      const body = await readJson(req);
+      const result = await applyModbusPoll(body);
+      return send(res, 200, JSON.stringify({ ok: true, ...result }), "application/json");
     }
     if (req.method === "POST" && url.pathname === "/api/serial") {
       const body = await readText(req);

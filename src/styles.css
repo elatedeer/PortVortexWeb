@@ -83,11 +83,21 @@ select {
   letter-spacing: 0;
 }
 
+.ai-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--muted) 30%, transparent);
+  padding: 18px;
+}
+
 .sidebar-icon {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
-  font-size: 22px;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  font-size: 18px;
 }
 
 .token-help-button {
@@ -481,6 +491,17 @@ select {
 
 .quick-menu-item:hover {
   background: #f1f5f9;
+}
+
+.modbus-poll-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
 }
 
 .quick-delete {

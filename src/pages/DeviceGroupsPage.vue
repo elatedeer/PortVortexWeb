@@ -212,6 +212,8 @@ async function createFlashJob(device) {
   data.set("target", "stm32f4");
   data.set("baseAddr", "0x08000000");
   data.set("erase", "sector");
+  data.set("version", selectedGroup.value.version || "");
+  data.set("versionAddr", "0x0800FFF0");
   data.set("singlePacket", "0");
   data.set("noResetAfterProgram", "0");
   data.set("algoBlobPresent", "0");
