@@ -62,7 +62,7 @@
         <div class="flex min-h-16 items-center justify-between gap-4 px-4 md:px-8">
           <div>
             <h1 class="text-xl font-semibold tracking-tight">{{ pageTitle }}</h1>
-            <p class="mt-0.5 text-xs text-muted-foreground">{{ t.headerHint }}</p>
+            <p v-if="t.headerHint" class="mt-0.5 text-xs text-muted-foreground">{{ t.headerHint }}</p>
           </div>
           <div class="flex items-center gap-3">
             <el-segmented v-model="lang" :options="languageOptions" />
@@ -136,7 +136,12 @@
                 <div class="grid gap-4 lg:grid-cols-2">
                   <div class="field-block lg:col-span-2">
                     <div class="field-label">{{ t.downloadMode }}</div>
-                    <el-segmented v-model="flash.flashMode" :options="downloadModes" />
+                    <div class="flex flex-wrap items-center gap-3">
+                      <el-segmented v-model="flash.flashMode" :options="downloadModes" />
+                      <el-button v-if="showSerialForwardButton" @click="openSerialForwardDialog">
+                        {{ t.serialForward }}
+                      </el-button>
+                    </div>
                   </div>
                   <div class="field-block">
                     <div class="field-label">{{ t.deviceToken }}</div>
@@ -172,8 +177,9 @@
                         v-model="flash.target"
                         :fetch-suggestions="queryTargets"
                         clearable
-                        placeholder="stm32f4"
-                        @select="applyTargetConfig($event.value)"
+                        placeholder="Select or import a chip"
+                        @select="selectTargetModel($event.value)"
+                        @change="onTargetModelChange"
                       />
                     </div>
                     <div class="field-block">
@@ -271,6 +277,9 @@
                             <el-button :loading="parsingFlm" :disabled="!flmFile" @click="parseFlmFile">
                               {{ t.parseFlm }}
                             </el-button>
+                            <el-button :loading="importingPackConfigs" :disabled="!flmFile" @click="importPackChipConfigs">
+                              {{ t.importPackLibrary }}
+                            </el-button>
                           </div>
                         </div>
                         <div v-if="packDevices.length" class="field-block md:col-span-3">
@@ -310,6 +319,15 @@
                           :rows="7"
                           placeholder='{"id":"stm32g0","defaults":{"baseAddr":"0x08000000"},"swd":{"profile":"model=stm32g0;flash_base=0x08000000;erase=sector"}}'
                         />
+                        <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+                          <input class="file-input" type="file" accept=".json,application/json" @change="onChipBundleChange">
+                          <el-button :loading="importingChipBundle" :disabled="!chipBundleFile" @click="importChipConfigBundle">
+                            {{ t.importBundle }}
+                          </el-button>
+                          <el-button @click="exportChipConfigBundle">
+                            {{ t.exportBundle }}
+                          </el-button>
+                        </div>
                       </div>
                     </el-tab-pane>
                   </el-tabs>
@@ -369,7 +387,7 @@
                     <el-button :loading="serialLoading === 'uart1'" @click="openSerialConfig('uart1')">{{ t.serialConfig }}</el-button>
                   </div>
                 </template>
-                <chat-channel :channel="channels.general" :labels="t" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @file-send="sendChannelFile('general')" @clear="clearChannel('general')" @format-change="persistChatFormat('general')" @timer-change="syncTimedSend('general')" />
+                <chat-channel :channel="channels.general" :labels="t" :channel-name="t.generalChat" :engineer-name="user.name" @connect="connectChannel('general')" @close="closeChannel('general')" @send="sendChannel('general')" @file-send="sendChannelFile('general')" @clear="clearChannel('general')" @format-change="persistChatFormat('general')" @timer-change="syncTimedSend('general')" />
               </el-card>
               <el-card class="control-card" shadow="never">
                 <template #header>
@@ -381,7 +399,7 @@
                     </div>
                   </div>
                 </template>
-                <chat-channel :channel="channels.rs485" :labels="t" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @file-send="sendChannelFile('rs485')" @clear="clearChannel('rs485')" @format-change="persistChatFormat('rs485')" @timer-change="syncTimedSend('rs485')" />
+                <chat-channel :channel="channels.rs485" :labels="t" :channel-name="t.rs485Chat" :engineer-name="user.name" @connect="connectChannel('rs485')" @close="closeChannel('rs485')" @send="sendChannel('rs485')" @file-send="sendChannelFile('rs485')" @clear="clearChannel('rs485')" @format-change="persistChatFormat('rs485')" @timer-change="syncTimedSend('rs485')" />
               </el-card>
             </section>
           </section>
@@ -432,7 +450,7 @@
                   <el-button type="primary" :loading="canConfigSaving" @click="saveCanConfig">{{ t.save }}</el-button>
                 </div>
               </div>
-              <chat-channel :channel="channels.can" :labels="t" @connect="connectChannel('can')" @close="closeChannel('can')" @send="sendChannel('can')" @file-send="sendChannelFile('can')" @clear="clearChannel('can')" @format-change="persistChatFormat('can')" @timer-change="syncTimedSend('can')" />
+              <chat-channel :channel="channels.can" :labels="t" :channel-name="t.canChat" :engineer-name="user.name" @connect="connectChannel('can')" @close="closeChannel('can')" @send="sendChannel('can')" @file-send="sendChannelFile('can')" @clear="clearChannel('can')" @format-change="persistChatFormat('can')" @timer-change="syncTimedSend('can')" />
             </el-card>
           </section>
         </template>
@@ -504,9 +522,23 @@
                   <div class="field-label">{{ t.feedbackContent }}</div>
                   <el-input v-model="feedbackForm.content" type="textarea" :rows="7" />
                 </div>
+                <div class="field-block md:col-span-2">
+                  <div class="field-label">{{ t.feedbackAttachments }}</div>
+                  <input
+                    :key="feedbackAttachmentInputKey"
+                    class="file-input"
+                    type="file"
+                    multiple
+                    accept="image/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.txt,.zip,.rar,.7z"
+                    @change="onFeedbackAttachmentsChange"
+                  >
+                  <div v-if="feedbackAttachments.length" class="mt-2 space-y-1 text-xs text-muted-foreground">
+                    <div v-for="file in feedbackAttachments" :key="`${file.name}-${file.size}`">{{ file.name }} ({{ formatFileSize(file.size) }})</div>
+                  </div>
+                </div>
               </div>
               <div class="mt-5 flex gap-3">
-                <el-button type="primary" @click="submitFeedback">{{ t.submitFeedback }}</el-button>
+                <el-button type="primary" :loading="feedbackSubmitting" @click="submitFeedback">{{ t.submitFeedback }}</el-button>
                 <el-button @click="resetFeedback">{{ t.clearFeedback }}</el-button>
               </div>
             </el-card>
@@ -847,6 +879,34 @@
         </div>
       </div>
     </div>
+    <div v-if="serialForwardDialogVisible" class="modal-backdrop" @click.self="serialForwardDialogVisible = false">
+      <div class="serial-dialog">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <div class="text-lg font-semibold">{{ t.serialForward }}</div>
+            <div class="mt-1 text-xs text-muted-foreground">{{ t.serialForwardHint }}</div>
+          </div>
+          <button class="quick-menu-button" type="button" :title="t.close" @click="serialForwardDialogVisible = false">x</button>
+        </div>
+        <div class="mt-4 space-y-4">
+          <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px]">
+            <div class="field-block md:col-span-2">
+              <div class="field-label">{{ t.serialForwardKey }}</div>
+              <div class="rounded-lg border border-input bg-muted px-3 py-2 text-sm font-mono">
+                {{ flash.deviceToken || "-" }}
+              </div>
+            </div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">{{ t.serialForwardCommand }}</div>
+            <pre class="log-view whitespace-pre-wrap">{{ serialForwardCommand }}</pre>
+          </div>
+          <div class="rounded-lg border border-border bg-muted p-3 text-xs text-muted-foreground">
+            {{ t.serialForwardScriptHint }}
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2">
       <div
         v-for="toast in toasts"
@@ -916,12 +976,15 @@ const logs = ref([]);
 const firmwareFile = ref(null);
 const algoBlobFile = ref(null);
 const flmFile = ref(null);
+const chipBundleFile = ref(null);
 const packDevices = ref([]);
 const selectedPackDevice = ref("");
-const targetOptions = ref(["stm32f1", "stm32f4", "gd32f1", "ch32f2"]);
+const targetOptions = ref([]);
 const chipConfigs = ref([]);
 const chipConfigInput = ref("");
 const importingChipConfig = ref(false);
+const importingPackConfigs = ref(false);
+const importingChipBundle = ref(false);
 const parsingFlm = ref(false);
 const offlineSettingsSaving = ref(false);
 const serialLoading = ref("");
@@ -933,6 +996,7 @@ const modbusLoading = ref(false);
 const modbusSaving = ref(false);
 const modbusPollSaving = ref(false);
 const modbusStatusText = ref("");
+const serialForwardDialogVisible = ref(false);
 const meta = reactive({ firmwareVersion: "v1.0.0", onlineEngineerCount: 1, deviceOnline: false });
 const toasts = ref([]);
 let chatMessageSeq = 0;
@@ -941,7 +1005,12 @@ let timedWorker = null;
 let timedWakeLock = null;
 const timedInFlight = new Set();
 const CHAT_QUICK_PHRASES_STORAGE_PREFIX = "portvortex.chat.quickPhrases.";
+const TARGET_HISTORY_STORAGE_KEY = "portvortex.flash.targetHistory";
+const LAST_TARGET_STORAGE_KEY = "portvortex.flash.lastTarget";
 const feedbackForm = reactive({ title: "", type: "bug", contact: "", content: "" });
+const feedbackSubmitting = ref(false);
+const feedbackAttachments = ref([]);
+const feedbackAttachmentInputKey = ref(0);
 const serialRaw = reactive({ uart1: "", rs485: "", can: "" });
 const serialForms = reactive({
   uart1: { baud: 115200, data_bits: "8", parity: "none", stop_bits: "1", flow: "none" },
@@ -954,6 +1023,7 @@ const canConfig = reactive({ bitrate: 500000 });
 const modbusForm = reactive({ mode: "bridge", addr: 1 });
 const modbusPollForm = reactive({ name: "meter1", slave: 1, fc: 4, addr: 0, qty: 1, interval: 1000 });
 const modbusPolls = ref([]);
+const targetHistory = ref(loadTargetHistory());
 const serialPorts = [
   { key: "uart1", label: "UART1", kind: "serial" },
   { key: "rs485", label: "RS485", kind: "serial" }
@@ -1026,6 +1096,9 @@ const copy = {
     algoBlobHelp: "Algo blob 是 custom_sram_algo 使用的目标 SRAM 烧录算法二进制；也可以选择 CMSIS FLM 或 PACK 文件自动解析 cmsis_flm 参数。",
     flmFile: "FLM/PACK 文件",
     parseFlm: "解析算法",
+    importPackLibrary: "导入芯片库",
+    importBundle: "导入迁移包",
+    exportBundle: "导出迁移包",
     flmParsed: "算法已解析",
     downloadLog: "下载日志",
     liveChat: "实时对话",
@@ -1068,6 +1141,7 @@ const copy = {
     feedbackTitle: "标题",
     feedbackType: "类型",
     feedbackContent: "问题描述",
+    feedbackAttachments: "图片和附件",
     contactWay: "联系方式",
     feedbackBug: "问题",
     feedbackImprove: "建议",
@@ -1075,6 +1149,7 @@ const copy = {
     submitFeedback: "提交反馈",
     clearFeedback: "清空",
     clearContent: "清空内容",
+    saveContent: "保存内容",
     authorContact: "作者联系方式",
     feedbackHint: "留下联系方式，便于后续定位和回复。",
     connect: "连接",
@@ -1147,6 +1222,9 @@ const copy = {
     algoBlobHelp: "Algo blob is a raw SRAM flash algorithm binary. You can also select a CMSIS FLM or PACK file to auto-fill cmsis_flm parameters.",
     flmFile: "FLM/PACK file",
     parseFlm: "Parse algo",
+    importPackLibrary: "Import library",
+    importBundle: "Import bundle",
+    exportBundle: "Export bundle",
     flmParsed: "Algorithm parsed",
     downloadLog: "Download Log",
     liveChat: "Live Chat",
@@ -1189,6 +1267,7 @@ const copy = {
     feedbackTitle: "Title",
     feedbackType: "Type",
     feedbackContent: "Details",
+    feedbackAttachments: "Images and attachments",
     contactWay: "Contact",
     feedbackBug: "Issue",
     feedbackImprove: "Suggestion",
@@ -1196,6 +1275,7 @@ const copy = {
     submitFeedback: "Submit",
     clearFeedback: "Clear",
     clearContent: "Clear content",
+    saveContent: "Save content",
     authorContact: "Author Contact",
     feedbackHint: "Leave a way to reach you so the issue can be traced and replied to.",
     connect: "Connect",
@@ -1396,7 +1476,7 @@ Object.assign(copy.en, {
 Object.assign(copy.zh, {
   deviceToken: "设备 ID",
   deviceTokenHelp: "设备 ID 可从固件 AT+AUTH?、设备标签或设备管理信息中获取；MQTT 主题使用 /topic/设备ID 生成。",
-  headerHint: "输入设备 ID 后，系统自动补全 MQTT 连接与主题。",
+  headerHint: "",
   mqttHidden: "MQTT broker、账号、密码、QoS 和主题前缀均由设备 ID 自动生成。",
   importByToken: "按设备 ID 导入设备",
   tokenImportPlaceholder: "每行一个设备 ID，也可以粘贴 /topic/<设备ID>/qos1 这类完整主题。",
@@ -1407,16 +1487,24 @@ Object.assign(copy.zh, {
   useToken: "使用",
   deviceAuthImport: "手动导入设备密钥",
   deviceAuthImportHint: "粘贴固件端生成的 device_id 和 secret。device_id 将作为页面中的设备 ID 使用，并用于签名密钥匹配。",
-  deviceAuthImportPlaceholder: "device_id=pv_c6a3ac6182728982;secret=c06a4e4bc06d96d0cc77cc7320df110f7dc26cc7658eb104d4b7833de8aa5b81",
+  deviceAuthImportPlaceholder: "",
   deviceAuthImported: "密钥导入成功",
   deviceAuthDuplicateConfirm: "以下 device_id 已存在，是否覆盖",
-  deviceAuthDuplicateCanceled: "已取消覆盖"
+  deviceAuthDuplicateCanceled: "已取消覆盖",
+  serialForward: "串口转发",
+  serialForwardHint: "使用当前设备 ID 和下载方式建立本地串口到服务器的转发。",
+  serialForwardKey: "当前设备 ID",
+  serialForwardCommand: "脚本命令",
+  serialForwardScriptHint: "脚本会自动创建或复用 com0com 虚拟串口对，并提示外部软件应连接的 COM 口；服务器通信通道与实时通信中的串口/485一致。",
+  useCurrentDevice: "使用当前设备",
+  feedbackSubmitted: "反馈邮件已发送",
+  feedbackMailMissing: "请填写标题或问题描述"
 });
 
 Object.assign(copy.en, {
   deviceToken: "Device ID",
   deviceTokenHelp: "Find the device ID from firmware AT+AUTH?, the device label, or device management data. MQTT topics use /topic/<device_id>.",
-  headerHint: "Enter the device ID; MQTT connection and topics are generated automatically.",
+  headerHint: "",
   mqttHidden: "MQTT broker, account, password, QoS, and topic prefix are generated from the device ID.",
   importByToken: "Import devices by ID",
   tokenImportPlaceholder: "One device ID per line. Full topics such as /topic/<device_id>/qos1 are also supported.",
@@ -1427,10 +1515,18 @@ Object.assign(copy.en, {
   useToken: "Use",
   deviceAuthImport: "Manual Device Secret Import",
   deviceAuthImportHint: "Paste the device_id and secret generated for firmware auth. device_id is used as the page device ID and for signing key lookup.",
-  deviceAuthImportPlaceholder: "device_id=pv_c6a3ac6182728982;secret=c06a4e4bc06d96d0cc77cc7320df110f7dc26cc7658eb104d4b7833de8aa5b81",
+  deviceAuthImportPlaceholder: "",
   deviceAuthImported: "Device secret imported",
   deviceAuthDuplicateConfirm: "These device_id values already exist. Overwrite them",
-  deviceAuthDuplicateCanceled: "Overwrite canceled"
+  deviceAuthDuplicateCanceled: "Overwrite canceled",
+  serialForward: "Serial Forward",
+  serialForwardHint: "Bridge the local serial ports to the server with the current device ID and download mode.",
+  serialForwardKey: "Current Device ID",
+  serialForwardCommand: "Script command",
+  serialForwardScriptHint: "The script creates or reuses a com0com virtual pair and prints the COM port for external tools. Server topics match the live Serial/RS485 channels.",
+  useCurrentDevice: "Use Current Device",
+  feedbackSubmitted: "Feedback email sent",
+  feedbackMailMissing: "Enter a title or description"
 });
 
 const t = computed(() => copy[lang.value]);
@@ -1472,7 +1568,7 @@ const uartFields = [
 const flash = reactive({
   flashMode: "swd",
   deviceToken: DEFAULT_DEVICE_TOKEN,
-  target: "stm32f4",
+  target: "",
   baseAddr: "0x08000000",
   erase: "sector",
   attach: "",
@@ -1535,6 +1631,12 @@ const sideNav = computed(() => [
 const anyChannelConnected = computed(() => Object.values(channels).some((channel) => channel.connected));
 const deviceOnline = computed(() => meta.deviceOnline || flashing.value || anyChannelConnected.value);
 const onlineBadgeText = computed(() => deviceOnline.value ? t.value.deviceOnline : t.value.deviceOffline);
+const showSerialForwardButton = computed(() => flash.flashMode === "uart" || flash.flashMode === "rs485");
+const serialForwardCommand = computed(() => {
+  const key = String(flash.deviceToken || "<device_id>").trim() || "<device_id>";
+  const mode = flash.flashMode === "rs485" ? "rs485" : "uart";
+  return `python scripts/serial_forward.py ${key} --mode ${mode} --server http://localhost:3000 --auto-com0com`;
+});
 const infoCards = computed(() => [
   { label: t.value.modelCard, value: "WifiLinker", hint: t.value.targetModel, icon: Monitor, bar: "bg-gradient-to-r from-sky-500 to-cyan-400" },
   { label: t.value.versionCard, value: meta.firmwareVersion || "-", hint: t.value.formatAuto, icon: Document, bar: "bg-gradient-to-r from-violet-500 to-fuchsia-400" },
@@ -1562,10 +1664,13 @@ onMounted(async () => {
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", handleTimedVisibilityChange);
   }
+  applyDeviceToken(getDeviceTokenFromPath(), "route");
   try {
     const response = await fetch("/api/meta");
     const payload = await readJsonResponse(response, "Load metadata failed");
     syncMetaPayload(payload);
+    const lastTarget = loadLastTarget();
+    if (lastTarget && findTargetConfig(lastTarget)) flash.target = lastTarget;
     applyTargetConfig(flash.target);
   } catch (_) {
     // Metadata is optional for the UI.
@@ -1608,14 +1713,89 @@ function saveQuickPhrases(key, phrases) {
   window.localStorage.setItem(`${CHAT_QUICK_PHRASES_STORAGE_PREFIX}${key}`, JSON.stringify(cleaned));
 }
 
+function loadTargetHistory() {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(TARGET_HISTORY_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed)
+      ? [...new Set(parsed.map((item) => normalizeTarget(item)).filter(Boolean))]
+      : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveTargetHistory(target) {
+  const normalized = normalizeTarget(target);
+  if (!normalized) return;
+  const next = [normalized, ...targetHistory.value.filter((item) => normalizeTarget(item) !== normalized)].slice(0, 20);
+  targetHistory.value = next;
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(TARGET_HISTORY_STORAGE_KEY, JSON.stringify(next));
+    window.localStorage.setItem(LAST_TARGET_STORAGE_KEY, normalized);
+  }
+}
+
+function loadLastTarget() {
+  if (typeof window === "undefined") return "";
+  return normalizeTarget(window.localStorage.getItem(LAST_TARGET_STORAGE_KEY) || targetHistory.value[0] || "");
+}
+
+function targetPrefix(value) {
+  const normalized = normalizeTarget(value);
+  return /^[a-z]+\d+/.exec(normalized)?.[0] || /^[a-z]+/.exec(normalized)?.[0] || "#";
+}
+
+function buildTargetSuggestions(query = "") {
+  const normalizedQuery = normalizeTarget(query);
+  const allTargets = [...new Set(targetOptions.value.map(normalizeTarget).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const matches = allTargets.filter((item) => !normalizedQuery || item.includes(normalizedQuery));
+  const history = [...new Set(targetHistory.value.map(normalizeTarget).filter((item) => item && matches.includes(item)))];
+  const historySet = new Set(history);
+  const groups = new Map();
+  for (const value of matches.filter((item) => !historySet.has(item))) {
+    const prefix = targetPrefix(value);
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix).push(value);
+  }
+  const items = [];
+  if (history.length) {
+    items.push({ value: "__history", label: "History", header: true });
+    items.push(...history.map((value) => ({ value })));
+  }
+  for (const prefix of [...groups.keys()].sort((a, b) => a.localeCompare(b))) {
+    items.push({ value: `__group_${prefix}`, label: prefix, header: true });
+    items.push(...groups.get(prefix).map((value) => ({ value })));
+  }
+  return items;
+}
+
 function applyTokenHistory(token) {
   const next = String(token || "").trim();
   if (!next) return;
+  applyDeviceToken(next, "history");
+  showToast(lang.value === "zh" ? "已应用设备 ID" : "Device ID applied", "success");
+}
+
+function applyDeviceToken(token, source = "manual") {
+  const next = String(token || "").trim();
+  if (!next) return false;
   flash.deviceToken = next;
   chatDeviceToken.value = next;
-  saveDeviceTokenHistory(next, "history");
   syncChatTopics();
-  showToast(lang.value === "zh" ? "已应用设备 ID" : "Device ID applied", "success");
+  if (source !== "route") saveDeviceTokenHistory(next, source);
+  return true;
+}
+
+function getDeviceTokenFromPath() {
+  if (typeof window === "undefined") return "";
+  const segments = window.location.pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length !== 1) return "";
+  const [candidate] = segments;
+  return /^[A-Za-z0-9_-]+$/.test(candidate) ? candidate : "";
 }
 
 function createChannelState(key, subscribeTopic, publishTopic, target) {
@@ -1671,6 +1851,21 @@ function syncMetaPayload(payload) {
   meta.deviceOnline = Boolean(payload.deviceOnline);
 }
 
+async function refreshTargetModels() {
+  try {
+    const response = await fetch("/api/meta");
+    const payload = await readJsonResponse(response, "Refresh target models failed");
+    if (!response.ok) throw new Error(payload.error || "Refresh target models failed");
+    syncMetaPayload(payload);
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+function openSerialForwardDialog() {
+  serialForwardDialogVisible.value = true;
+}
+
 function showToast(message, type = "info") {
   const id = ++toastSeq;
   toasts.value.push({ id, message: String(message || ""), type });
@@ -1686,10 +1881,7 @@ function toastClasses(type) {
 }
 
 function queryTargets(query, callback) {
-  const items = targetOptions.value
-    .filter((item) => item.toLowerCase().includes(String(query || "").toLowerCase()))
-    .map((value) => ({ value }));
-  callback(items);
+  callback(buildTargetSuggestions(query));
 }
 
 function normalizeTarget(value) {
@@ -1719,6 +1911,21 @@ function applyTargetConfig(target) {
   applyFlashValues(config.defaults);
   applyFlashValues(config[mode]);
   flash.target = requestedTarget;
+}
+
+function selectTargetModel(target) {
+  flash.target = normalizeTarget(target);
+  applyTargetConfig(flash.target);
+  saveTargetHistory(flash.target);
+}
+
+function onTargetModelChange(target) {
+  const normalized = normalizeTarget(target);
+  if (!normalized) {
+    refreshTargetModels();
+    return;
+  }
+  if (findTargetConfig(normalized)) saveTargetHistory(normalized);
 }
 
 function extractChipConfigJson(text) {
@@ -1751,6 +1958,7 @@ async function importChipConfig() {
     syncMetaPayload(payload.meta || {});
     flash.target = payload.config.id;
     applyTargetConfig(payload.config.id);
+    saveTargetHistory(payload.config.id);
     chipConfigInput.value = "";
     showToast(`Imported ${payload.config.id}`, "success");
   } catch (err) {
@@ -1774,6 +1982,10 @@ function onFlmFileChange(event) {
   selectedPackDevice.value = "";
 }
 
+function onChipBundleChange(event) {
+  chipBundleFile.value = event.target.files[0] || null;
+}
+
 async function parseFlmFile() {
   if (!flmFile.value) return;
   parsingFlm.value = true;
@@ -1789,6 +2001,7 @@ async function parseFlmFile() {
     packDevices.value = payload.pack?.devices || [];
     if (selectedPackDevice.value) flash.target = selectedPackDevice.value;
     applyFlashValues(payload.params || {});
+    if (selectedPackDevice.value) saveTargetHistory(selectedPackDevice.value);
     expert.value = true;
     const name = payload.flashDevice?.name ? ` (${payload.flashDevice.name})` : "";
     showToast(`${t.value.flmParsed}${name}`, "success");
@@ -1796,6 +2009,70 @@ async function parseFlmFile() {
     showToast(err.message, "error");
   } finally {
     parsingFlm.value = false;
+  }
+}
+
+async function importPackChipConfigs() {
+  if (!flmFile.value) return;
+  importingPackConfigs.value = true;
+  try {
+    const data = new FormData();
+    data.set("packFile", flmFile.value);
+    appendFormValue(data, "algoLoadAddr", flash.algoLoadAddr);
+    const response = await fetch("/api/chip-configs/import-pack", { method: "POST", body: data });
+    const payload = await readJsonResponse(response, "PACK chip import failed");
+    if (!response.ok) throw new Error(payload.error || "PACK chip import failed");
+    syncMetaPayload(payload.meta || {});
+    const first = payload.imported?.[0]?.id;
+    if (first) {
+      flash.target = first;
+      applyTargetConfig(first);
+      saveTargetHistory(first);
+    }
+    showToast(`Imported ${payload.imported?.length || 0}, skipped ${payload.skipped?.length || 0}, conflicts ${payload.conflicts?.length || 0}`, "success");
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    importingPackConfigs.value = false;
+  }
+}
+
+async function importChipConfigBundle() {
+  if (!chipBundleFile.value) return;
+  importingChipBundle.value = true;
+  try {
+    const data = new FormData();
+    data.set("bundleFile", chipBundleFile.value);
+    const response = await fetch("/api/chip-configs/import-bundle", { method: "POST", body: data });
+    const payload = await readJsonResponse(response, "Chip bundle import failed");
+    if (!response.ok) throw new Error(payload.error || "Chip bundle import failed");
+    syncMetaPayload(payload.meta || {});
+    showToast(`Imported ${payload.imported?.length || 0}, skipped ${payload.skipped?.length || 0}`, "success");
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    importingChipBundle.value = false;
+  }
+}
+
+async function exportChipConfigBundle() {
+  try {
+    const response = await fetch("/api/chip-configs/export");
+    if (!response.ok) {
+      const payload = await readJsonResponse(response, "Chip bundle export failed");
+      throw new Error(payload.error || "Chip bundle export failed");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `portvortex-chip-configs-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showToast(err.message, "error");
   }
 }
 
@@ -2055,8 +2332,34 @@ async function persistChatFormat(key) {
   });
 }
 
-function submitFeedback() {
-  showToast(t.value.submitFeedback, "success");
+async function submitFeedback() {
+  const title = String(feedbackForm.title || "").trim();
+  const content = String(feedbackForm.content || "").trim();
+  if (!title && !content) {
+    showToast(t.value.feedbackMailMissing, "error");
+    return;
+  }
+  feedbackSubmitting.value = true;
+  try {
+    const data = new FormData();
+    data.set("title", title);
+    data.set("type", feedbackForm.type);
+    data.set("contact", feedbackForm.contact);
+    data.set("content", content);
+    feedbackAttachments.value.forEach((file, index) => data.set(`attachment${index}`, file));
+    const response = await fetch("/api/feedback", {
+      method: "POST",
+      body: data
+    });
+    const payload = await readJsonResponse(response, "Submit feedback failed");
+    if (!response.ok) throw new Error(payload.error || "Submit feedback failed");
+    showToast(t.value.feedbackSubmitted, "success");
+    resetFeedback();
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    feedbackSubmitting.value = false;
+  }
 }
 
 function resetFeedback() {
@@ -2064,6 +2367,19 @@ function resetFeedback() {
   feedbackForm.type = "bug";
   feedbackForm.contact = "";
   feedbackForm.content = "";
+  feedbackAttachments.value = [];
+  feedbackAttachmentInputKey.value += 1;
+}
+
+function onFeedbackAttachmentsChange(event) {
+  feedbackAttachments.value = Array.from(event.target.files || []);
+}
+
+function formatFileSize(size) {
+  const value = Number(size) || 0;
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
 }
 
 function appendFormValue(data, key, value) {
@@ -2111,6 +2427,7 @@ async function submitFlash() {
   if (!requireDeviceToken(flash.deviceToken)) return;
   if (flash.storeOnly) flash.singlePacket = false;
   saveDeviceTokenHistory(flash.deviceToken, "download");
+  if (findTargetConfig(flash.target)) saveTargetHistory(flash.target);
   flashing.value = true;
   progress.value = 0;
   logs.value = [];

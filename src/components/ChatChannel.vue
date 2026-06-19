@@ -108,6 +108,9 @@
       <Button variant="outline" :disabled="!channel.messages.length && !channel.message" @click="$emit('clear')">
         {{ labels.clearContent || labels.clearFeedback || "Clear" }}
       </Button>
+      <Button variant="outline" :disabled="!channel.messages.length && !channel.message" @click="saveContent">
+        {{ labels.saveContent || "Save content" }}
+      </Button>
     </div>
 
     <div ref="chatViewRef" class="chat-view">
@@ -214,7 +217,9 @@ import { convertMessageFormat } from "../utils/messageFormat";
 
 const props = defineProps({
   channel: { type: Object, required: true },
-  labels: { type: Object, required: true }
+  labels: { type: Object, required: true },
+  channelName: { type: String, default: "" },
+  engineerName: { type: String, default: "" }
 });
 
 const emit = defineEmits(["connect", "close", "send", "clear", "format-change", "timer-change", "file-send"]);
@@ -250,6 +255,64 @@ function removePhrase(phrase) {
 
 function emitTimerChange() {
   emit("timer-change");
+}
+
+function chatLine(item) {
+  const time = props.channel.showTimestamp && item.at ? `[${item.at}] ` : "";
+  const direction = item.direction || item.status || "status";
+  const text = item.message || item.status || "";
+  return `${time}${direction}: ${text}`;
+}
+
+function safeName(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, "_") || "unknown";
+}
+
+function defaultSaveName() {
+  const stamp = new Date().toISOString().replace("T", "_").replace(/[:.]/g, "-").slice(0, 19);
+  return [
+    safeName("PortVortex"),
+    stamp,
+    safeName(props.channelName || props.channel.target || "chat"),
+    safeName(props.engineerName || "engineer")
+  ].join("-") + ".txt";
+}
+
+async function saveContent() {
+  const lines = props.channel.messages.map(chatLine);
+  const draft = String(props.channel.message || "");
+  if (draft) lines.push(`draft: ${draft}`);
+  if (!lines.length) return;
+  const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/plain;charset=utf-8" });
+  const suggestedName = defaultSaveName();
+  if (typeof window !== "undefined" && typeof window.showSaveFilePicker === "function") {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{
+          description: "Text",
+          accept: { "text/plain": [".txt"] }
+        }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+    } catch (err) {
+      if (err?.name !== "AbortError") throw err;
+    }
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = suggestedName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 watch(

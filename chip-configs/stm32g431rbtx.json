@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "stm32g431rbtx",
+  "label": "STM32G431RBTx",
+  "aliases": [],
+  "description": "Imported from PACK Keil.STM32G4xx_DFP.2.2.0.pack.",
+  "defaults": {
+    "target": "stm32g431rbtx",
+    "baseAddr": "0x08000000",
+    "flashBase": "0x08000000",
+    "eraseSize": "0x00000800",
+    "erase": "sector",
+    "attach": "",
+    "chunkSize": 2048,
+    "chunkDelay": 0,
+    "ackTimeout": 300,
+    "window": 3
+  },
+  "swd": {
+    "algo": "cmsis_flm",
+    "baseAddr": "0x08000000",
+    "flashBase": "0x08000000",
+    "eraseSize": "0x00000800",
+    "algoLoadAddr": "0x20000000",
+    "algoInitPc": "0x20000001",
+    "algoErasePc": "0x20000091",
+    "algoFullErasePc": "0x20000071",
+    "algoProgramPc": "0x2000010f",
+    "algoUninitPc": "0x2000005b",
+    "algoDoneAddr": "0x20001658",
+    "algoDoneMagic": "",
+    "algoStack": "0x20001a60",
+    "algoBufferAddr": "0x20001258",
+    "algoBufferSize": "1024",
+    "algoTimeoutMs": "",
+    "algoInitTimeoutMs": "",
+    "algoEraseTimeoutMs": "400",
+    "algoProgramTimeoutMs": "400",
+    "algoInitR0": "0x08000000",
+    "algoInitR1": "168000000",
+    "algoInitR2": "",
+    "algorithmRef": "43a5b71b7469c33f29b4e41382cbe9a9d5780b2b1c1d241b4fcc609d0db8f6f5.bin",
+    "algorithmSha256": "43a5b71b7469c33f29b4e41382cbe9a9d5780b2b1c1d241b4fcc609d0db8f6f5"
+  },
+  "uart": {},
+  "rs485": {},
+  "pack": {
+    "sourceFile": "Keil.STM32G4xx_DFP.2.2.0.pack",
+    "selectedFlm": "CMSIS/Flash/STM32G43x-4x_128.FLM",
+    "device": "STM32G431RBTx",
+    "parent": "STM32G4 Series",
+    "algorithm": "CMSIS/Flash/STM32G43x-4x_128.FLM",
+    "start": "0x08000000",
+    "size": "0x00020000"
+  },
+  "algorithm": {
+    "ref": "43a5b71b7469c33f29b4e41382cbe9a9d5780b2b1c1d241b4fcc609d0db8f6f5.bin",
+    "sha256": "43a5b71b7469c33f29b4e41382cbe9a9d5780b2b1c1d241b4fcc609d0db8f6f5",
+    "size": 4692,
+    "kind": "cmsis_flm"
+  }
+}

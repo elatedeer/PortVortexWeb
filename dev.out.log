@@ -1,0 +1,74 @@
+
+> portvortex-web-flasher@0.1.0 dev:web
+> vite --host 0.0.0.0
+
+Re-optimizing dependencies because lockfile has changed
+Port 5173 is in use, trying another one...
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m359[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5174[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://172.27.176.1:[1m5174[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://10.110.197.153:[1m5174[22m/[39m
+[2m18:29:28[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/shadcn-compat/ElAutocomplete.vue, /src/styles.css[22m
+[2m18:29:37[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:29:46[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:29:56[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:30:10[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:31:01[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:31:14[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:31:31[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:31:41[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:32:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:33:11[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:47:56[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/shadcn-compat/ElAutocomplete.vue, /src/styles.css[22m
+[2m18:48:04[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:48:13[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:48:41[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m18:48:49[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m19:30:10[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m19:30:20[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m19:30:41[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m19:31:13[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m19:32:05[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/shadcn-compat/ElAutocomplete.vue, /src/styles.css[22m
+[2m19:32:27[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/shadcn-compat/ElAutocomplete.vue, /src/styles.css[22m
+[2m20:02:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:02:17[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:02:42[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:02:50[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:03:10[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:03:20[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:03:30[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:03:59[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:04:08[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:04:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:05:52[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:10:58[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:11:05[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:11:14[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:11:27[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:19:15[22m [36m[1m[vite][22m[39m [32m.env changed, restarting server...[39m
+[2m20:19:15[22m [36m[1m[vite][22m[39m server restarted.
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5174[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://172.27.176.1:[1m5174[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://10.216.4.111:[1m5174[22m/[39m
+[2m20:20:17[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChatChannel.vue, /src/styles.css[22m
+[2m20:20:25[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:28:04[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:28:27[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:28:37[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:28:51[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:29:01[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:29:09[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:29:26[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:29:38[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:29:50[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:29:57[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:30:13[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChatChannel.vue, /src/styles.css[22m
+[2m20:30:28[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChatChannel.vue, /src/styles.css[22m
+[2m20:41:47[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m20:50:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m21:00:38[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m21:00:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m21:01:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m

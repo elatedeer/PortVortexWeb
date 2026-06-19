@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "stm32g491metx",
+  "label": "STM32G491METx",
+  "aliases": [],
+  "description": "Imported from PACK Keil.STM32G4xx_DFP.2.2.0.pack.",
+  "defaults": {
+    "target": "stm32g491metx",
+    "baseAddr": "0x08000000",
+    "flashBase": "0x08000000",
+    "eraseSize": "0x00000800",
+    "erase": "sector",
+    "attach": "",
+    "chunkSize": 2048,
+    "chunkDelay": 0,
+    "ackTimeout": 300,
+    "window": 3
+  },
+  "swd": {
+    "algo": "cmsis_flm",
+    "baseAddr": "0x08000000",
+    "flashBase": "0x08000000",
+    "eraseSize": "0x00000800",
+    "algoLoadAddr": "0x20000000",
+    "algoInitPc": "0x20000001",
+    "algoErasePc": "0x20000091",
+    "algoFullErasePc": "0x20000071",
+    "algoProgramPc": "0x2000010f",
+    "algoUninitPc": "0x2000005b",
+    "algoDoneAddr": "0x20001658",
+    "algoDoneMagic": "",
+    "algoStack": "0x20001a60",
+    "algoBufferAddr": "0x20001258",
+    "algoBufferSize": "1024",
+    "algoTimeoutMs": "",
+    "algoInitTimeoutMs": "",
+    "algoEraseTimeoutMs": "400",
+    "algoProgramTimeoutMs": "400",
+    "algoInitR0": "0x08000000",
+    "algoInitR1": "168000000",
+    "algoInitR2": "",
+    "algorithmRef": "44d08891bf075ccbaf506ab130d1faabcb1a985e73f1e9f4e37b72cc7a87e5ca.bin",
+    "algorithmSha256": "44d08891bf075ccbaf506ab130d1faabcb1a985e73f1e9f4e37b72cc7a87e5ca"
+  },
+  "uart": {},
+  "rs485": {},
+  "pack": {
+    "sourceFile": "Keil.STM32G4xx_DFP.2.2.0.pack",
+    "selectedFlm": "CMSIS/Flash/STM32G49x-Ax_512.FLM",
+    "device": "STM32G491METx",
+    "parent": "STM32G4 Series",
+    "algorithm": "CMSIS/Flash/STM32G49x-Ax_512.FLM",
+    "start": "0x08000000",
+    "size": "0x00080000"
+  },
+  "algorithm": {
+    "ref": "44d08891bf075ccbaf506ab130d1faabcb1a985e73f1e9f4e37b72cc7a87e5ca.bin",
+    "sha256": "44d08891bf075ccbaf506ab130d1faabcb1a985e73f1e9f4e37b72cc7a87e5ca",
+    "size": 4692,
+    "kind": "cmsis_flm"
+  }
+}

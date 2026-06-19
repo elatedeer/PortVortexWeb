@@ -1,3 +1,9 @@
 {
-  "devices": {}
+  "devices": [
+    {
+      "token": "pv_c6a3ac6182728982",
+      "device_id": "pv_c6a3ac6182728982",
+      "secret": "c06a4e4bc06d96d0cc77cc7320df110f7dc26cc7658eb104d4b7833de8aa5b81"
+    }
+  ]
 }

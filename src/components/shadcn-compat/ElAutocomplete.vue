@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { Input } from "@/components/ui/input";
 
 const props = defineProps({
@@ -15,11 +15,24 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(["update:modelValue", "select", "blur", "change"]);
+const emit = defineEmits(["update:modelValue", "select", "blur", "change", "action"]);
 const rootRef = ref(null);
 const open = ref(false);
 const suggestions = ref([]);
 const dropdownStyle = ref({});
+const scrollTop = ref(0);
+const VIRTUAL_ROW_HEIGHT = 32;
+const VIRTUAL_VIEWPORT_HEIGHT = 224;
+const VIRTUAL_OVERSCAN = 8;
+
+const virtualStart = computed(() => Math.max(0, Math.floor(scrollTop.value / VIRTUAL_ROW_HEIGHT) - VIRTUAL_OVERSCAN));
+const virtualEnd = computed(() => Math.min(
+  suggestions.value.length,
+  Math.ceil((scrollTop.value + VIRTUAL_VIEWPORT_HEIGHT) / VIRTUAL_ROW_HEIGHT) + VIRTUAL_OVERSCAN
+));
+const visibleSuggestions = computed(() => suggestions.value.slice(virtualStart.value, virtualEnd.value));
+const virtualTotalHeight = computed(() => suggestions.value.length * VIRTUAL_ROW_HEIGHT);
+const virtualOffset = computed(() => virtualStart.value * VIRTUAL_ROW_HEIGHT);
 
 function updateDropdownPosition() {
   const root = rootRef.value;
@@ -53,6 +66,7 @@ function loadSuggestions(query = props.modelValue) {
   }
   props.fetchSuggestions(query, (items) => {
     suggestions.value = Array.isArray(items) ? items : [];
+    scrollTop.value = 0;
     setOpen(suggestions.value.length > 0);
   });
 }
@@ -63,6 +77,11 @@ function updateValue(next) {
 }
 
 function selectItem(item) {
+  if (item?.action) {
+    emit("action", item);
+    nextTick(() => loadSuggestions(props.modelValue));
+    return;
+  }
   const next = String(item?.value || "");
   emit("update:modelValue", next);
   emit("select", { ...item, value: next });
@@ -90,6 +109,10 @@ function onBlur(event) {
 
 function onChange() {
   emit("change", props.modelValue);
+}
+
+function onDropdownScroll(event) {
+  scrollTop.value = event.target?.scrollTop || 0;
 }
 
 onBeforeUnmount(() => {
@@ -126,19 +149,26 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div
         v-if="open"
-        class="z-[9999] max-h-56 overflow-auto rounded-lg border border-border bg-popover p-1 text-sm shadow-lg"
+        class="z-[9999] overflow-auto rounded-lg border border-border bg-popover p-1 text-sm shadow-lg"
         :style="dropdownStyle"
+        style="max-height: 14rem;"
+        @scroll="onDropdownScroll"
       >
-        <button
-          v-for="item in suggestions"
-          :key="item.value"
-          class="block w-full rounded-md px-2 py-1.5 text-left font-mono hover:bg-accent"
-          type="button"
-          @mousedown.prevent
-          @click="selectItem(item)"
-        >
-          {{ item.value }}
-        </button>
+        <div class="relative" :style="{ height: `${virtualTotalHeight}px` }">
+          <div class="absolute left-0 right-0 top-0" :style="{ transform: `translateY(${virtualOffset}px)` }">
+            <button
+              v-for="item in visibleSuggestions"
+              :key="`${item.value}-${item.label || ''}`"
+              :class="item.header ? 'block h-8 w-full px-2 text-left text-[11px] font-semibold uppercase leading-8 tracking-normal text-muted-foreground' : item.action ? 'block h-8 w-full rounded-md px-2 text-left text-xs font-semibold leading-8 text-primary hover:bg-accent' : 'block h-8 w-full rounded-md px-2 text-left font-mono leading-8 hover:bg-accent'"
+              type="button"
+              :disabled="item.header"
+              @mousedown.prevent
+              @click="item.header ? null : selectItem(item)"
+            >
+              {{ item.label || item.value }}
+            </button>
+          </div>
+        </div>
       </div>
     </Teleport>
   </div>

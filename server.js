@@ -2,6 +2,7 @@
 
 const http = require("http");
 const net = require("net");
+const tls = require("tls");
 const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
@@ -12,7 +13,9 @@ const DIST_DIR = path.join(__dirname, "dist");
 const PUBLIC_DIR = fs.existsSync(DIST_DIR) ? DIST_DIR : path.join(__dirname, "public");
 const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
 const CHIP_CONFIG_DIR = path.join(__dirname, "chip-configs");
+const CHIP_ALGORITHM_DIR = path.join(__dirname, "chip-algorithms");
 const DEVICE_AUTH_FILE = path.join(__dirname, "device-auth.json");
+const CHIP_BUNDLE_SCHEMA_VERSION = 1;
 const SIGNED_TOPIC_SUFFIXES = new Set([
   "/set",
   "/modbus/set",
@@ -24,6 +27,8 @@ const SIGNED_TOPIC_SUFFIXES = new Set([
   "/bin/start",
   "/uartflash/start"
 ]);
+
+loadEnvFile(path.join(__dirname, ".env"));
 
 const DEFAULTS = {
   broker: "gsaimqtt.jnxiangchen.com",
@@ -66,6 +71,23 @@ const FIXED_HARDWARE = {
 
 const jobs = new Map();
 const chats = new Map();
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  const text = fs.readFileSync(filePath, "utf8");
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const equals = trimmed.indexOf("=");
+    if (equals <= 0) continue;
+    const key = trimmed.slice(0, equals).trim();
+    let value = trimmed.slice(equals + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (key && process.env[key] === undefined) process.env[key] = value;
+  }
+}
 
 function readJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -189,6 +211,38 @@ function safeChipConfigId(value) {
   return id;
 }
 
+function chipConfigIdFromDeviceName(value) {
+  const id = normalizeTargetName(value).replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+  return safeChipConfigId(id);
+}
+
+function safeAlgorithmFilename(value) {
+  const name = path.basename(String(value || ""));
+  if (!/^[a-f0-9]{64}\.bin$/i.test(name)) throw new Error("invalid chip algorithm ref");
+  return name.toLowerCase();
+}
+
+function saveChipAlgorithmBlob(buffer) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("chip algorithm blob is empty");
+  const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
+  const filename = `${sha256}.bin`;
+  fs.mkdirSync(CHIP_ALGORITHM_DIR, { recursive: true });
+  const filePath = path.join(CHIP_ALGORITHM_DIR, filename);
+  if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, buffer);
+  return {
+    ref: filename,
+    sha256,
+    size: buffer.length
+  };
+}
+
+function loadChipAlgorithmBlob(ref) {
+  const filename = safeAlgorithmFilename(ref);
+  const filePath = path.join(CHIP_ALGORITHM_DIR, filename);
+  if (!fs.existsSync(filePath)) throw new Error(`chip algorithm blob not found: ${filename}`);
+  return { filename, data: fs.readFileSync(filePath) };
+}
+
 function loadChipConfigs() {
   if (!fs.existsSync(CHIP_CONFIG_DIR)) return [];
   return fs.readdirSync(CHIP_CONFIG_DIR)
@@ -218,7 +272,7 @@ function getChipConfigs() {
 
 function getTargetOptions() {
   const configs = getChipConfigs();
-  return configs.length ? configs.map((config) => config.id) : ["stm32f1", "stm32f4", "gd32f1", "ch32f2"];
+  return configs.length ? configs.map((config) => config.id) : [];
 }
 
 function findChipConfig(target) {
@@ -235,7 +289,10 @@ function buildClientChipConfig(config) {
     defaults: config.defaults || {},
     swd: config.swd || {},
     uart: config.uart || {},
-    rs485: config.rs485 || {}
+    rs485: config.rs485 || {},
+    pack: config.pack || null,
+    algorithm: config.algorithm || null,
+    schemaVersion: config.schemaVersion || CHIP_BUNDLE_SCHEMA_VERSION
   };
   return out;
 }
@@ -253,6 +310,7 @@ function normalizeChipConfig(input) {
     ? [...new Set(input.aliases.map(normalizeTargetName).filter(Boolean))]
     : [];
   const config = {
+    schemaVersion: Number(input.schemaVersion || CHIP_BUNDLE_SCHEMA_VERSION),
     id,
     label: String(input.label || input.name || id),
     aliases,
@@ -264,15 +322,212 @@ function normalizeChipConfig(input) {
   };
   if (input.sources !== undefined) config.sources = Array.isArray(input.sources) ? input.sources : [];
   if (input.notes !== undefined) config.notes = String(input.notes || "");
+  if (input.pack !== undefined) config.pack = normalizeObject(input.pack, "pack");
+  if (input.algorithm !== undefined) config.algorithm = normalizeObject(input.algorithm, "algorithm");
   return config;
 }
 
-function saveChipConfig(input) {
+function saveChipConfig(input, options = {}) {
   const config = normalizeChipConfig(input);
+  if (!options.overwrite && findChipConfig(config.id)) {
+    const err = new Error(`duplicate chip config: ${config.id}`);
+    err.code = "DUPLICATE_CHIP_CONFIG";
+    err.id = config.id;
+    throw err;
+  }
   fs.mkdirSync(CHIP_CONFIG_DIR, { recursive: true });
   const filePath = path.join(CHIP_CONFIG_DIR, `${config.id}.json`);
   fs.writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return config;
+}
+
+function chipExistsByIdOrAlias(id, aliases = []) {
+  const names = [id, ...aliases].map(normalizeTargetName).filter(Boolean);
+  return getChipConfigs().some((config) => {
+    const existing = [config.id, ...(Array.isArray(config.aliases) ? config.aliases : [])].map(normalizeTargetName);
+    return names.some((name) => existing.includes(name));
+  });
+}
+
+function aliasesForPackDeviceName(name, id) {
+  const normalizedName = normalizeTargetName(name);
+  return normalizedName && normalizedName !== id ? [normalizedName] : [];
+}
+
+function buildChipConfigFromParsedPack(device, parsed, algorithmMeta) {
+  const id = chipConfigIdFromDeviceName(device.name);
+  const aliases = aliasesForPackDeviceName(device.name, id);
+  const params = { ...(parsed.params || {}) };
+  const memoryFlashBase = device.memory?.start || "";
+  const resolvedFlashBase = memoryFlashBase || params.flashBase || params.baseAddr || DEFAULTS.baseAddr;
+  params.baseAddr = resolvedFlashBase;
+  params.flashBase = resolvedFlashBase;
+  if (params.algoInitR0) params.algoInitR0 = resolvedFlashBase;
+  const swd = {
+    ...params,
+    algorithmRef: algorithmMeta.ref,
+    algorithmSha256: algorithmMeta.sha256
+  };
+  return {
+    schemaVersion: CHIP_BUNDLE_SCHEMA_VERSION,
+    id,
+    label: device.name,
+    aliases: [...new Set(aliases)],
+    description: `Imported from PACK${parsed.sourceFile ? ` ${parsed.sourceFile}` : ""}.`,
+    defaults: {
+      target: id,
+      baseAddr: resolvedFlashBase,
+      flashBase: resolvedFlashBase,
+      flashSize: device.memory?.size || parsed.flashDevice?.flashSize || "",
+      eraseSize: params.eraseSize || "",
+      erase: "sector",
+      attach: "",
+      chunkSize: DEFAULTS.chunkSize,
+      chunkDelay: DEFAULTS.chunkDelay,
+      ackTimeout: DEFAULTS.ackTimeout,
+      window: DEFAULTS.window
+    },
+    swd,
+    uart: {},
+    rs485: {},
+    pack: {
+      sourceFile: parsed.sourceFile || "",
+      selectedFlm: parsed.pack?.selectedFlm || "",
+      device: device.name,
+      parent: device.parent || "",
+      algorithm: device.algorithm || parsed.pack?.selectedAlgorithm?.name || "",
+      start: device.start || parsed.pack?.selectedAlgorithm?.start || "",
+      size: device.size || parsed.pack?.selectedAlgorithm?.size || "",
+      memory: device.memory || null,
+      flmFlashBase: parsed.flashDevice?.flashBase || "",
+      flmFlashSize: parsed.flashDevice?.flashSize || ""
+    },
+    algorithm: {
+      ref: algorithmMeta.ref,
+      sha256: algorithmMeta.sha256,
+      size: algorithmMeta.size,
+      kind: "cmsis_flm"
+    }
+  };
+}
+
+function importChipConfigsFromPackFile(packFile, options = {}) {
+  const filename = packFile.filename || "import.pack";
+  const pack = extractPackFlm(packFile.data, { filename });
+  const devices = pack.pack?.devices || [];
+  const result = {
+    imported: [],
+    skipped: [],
+    conflicts: [],
+    algorithms: [],
+    totalDevices: devices.length
+  };
+  const seenAlgorithmRefs = new Set();
+
+  for (const device of devices) {
+    let configId = "";
+    try {
+      configId = chipConfigIdFromDeviceName(device.name);
+      const aliases = aliasesForPackDeviceName(device.name, configId);
+      if (!options.overwrite && chipExistsByIdOrAlias(configId, aliases)) {
+        result.skipped.push({ id: configId, name: device.name, reason: "exists" });
+        continue;
+      }
+      const parsed = parseAlgorithmFile(packFile, {
+        filename,
+        loadAddr: options.algoLoadAddr,
+        packDevice: device.name,
+        target: device.name
+      });
+      const algorithmMeta = saveChipAlgorithmBlob(parsed.algoBlob);
+      if (!seenAlgorithmRefs.has(algorithmMeta.ref)) {
+        seenAlgorithmRefs.add(algorithmMeta.ref);
+        result.algorithms.push(algorithmMeta);
+      }
+      const config = buildChipConfigFromParsedPack(device, parsed, algorithmMeta);
+      saveChipConfig(config, { overwrite: options.overwrite === true });
+      result.imported.push({ id: config.id, label: config.label, algorithmRef: algorithmMeta.ref });
+    } catch (err) {
+      result.conflicts.push({ id: configId || normalizeTargetName(device.name), name: device.name, error: err.message });
+    }
+  }
+
+  return result;
+}
+
+function exportChipConfigBundle() {
+  const configs = getChipConfigs().map((config) => {
+    const filePath = path.join(CHIP_CONFIG_DIR, `${config.id}.json`);
+    return fs.existsSync(filePath) ? readJsonFile(filePath) : config;
+  });
+  const refs = new Set();
+  for (const config of configs) {
+    for (const ref of [
+      config.algorithm?.ref,
+      config.swd?.algorithmRef,
+      config.uart?.algorithmRef,
+      config.rs485?.algorithmRef
+    ]) {
+      if (ref) refs.add(ref);
+    }
+  }
+  const algorithms = [];
+  for (const ref of refs) {
+    try {
+      const blob = loadChipAlgorithmBlob(ref);
+      algorithms.push({
+        ref: blob.filename,
+        sha256: crypto.createHash("sha256").update(blob.data).digest("hex"),
+        size: blob.data.length,
+        dataBase64: blob.data.toString("base64")
+      });
+    } catch (err) {
+      algorithms.push({ ref, missing: true, error: err.message });
+    }
+  }
+  return {
+    schemaVersion: CHIP_BUNDLE_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    chips: configs,
+    algorithms
+  };
+}
+
+function importChipConfigBundle(bundle, options = {}) {
+  if (!bundle || typeof bundle !== "object") throw new Error("chip config bundle must be a JSON object");
+  const chips = Array.isArray(bundle.chips) ? bundle.chips : [];
+  const algorithms = Array.isArray(bundle.algorithms) ? bundle.algorithms : [];
+  const result = { imported: [], skipped: [], algorithms: [], conflicts: [] };
+
+  for (const item of algorithms) {
+    try {
+      if (!item?.ref || !item.dataBase64) continue;
+      const data = Buffer.from(String(item.dataBase64), "base64");
+      const sha256 = crypto.createHash("sha256").update(data).digest("hex");
+      if (item.sha256 && normalizeTargetName(item.sha256) !== sha256) throw new Error(`sha256 mismatch for ${item.ref}`);
+      const saved = saveChipAlgorithmBlob(data);
+      result.algorithms.push(saved);
+    } catch (err) {
+      result.conflicts.push({ ref: item?.ref || "", error: err.message });
+    }
+  }
+
+  for (const chip of chips) {
+    let config;
+    try {
+      config = normalizeChipConfig(chip);
+      if (!options.overwrite && chipExistsByIdOrAlias(config.id, config.aliases)) {
+        result.skipped.push({ id: config.id, reason: "exists" });
+        continue;
+      }
+      saveChipConfig(config, { overwrite: options.overwrite === true });
+      result.imported.push({ id: config.id, label: config.label });
+    } catch (err) {
+      result.conflicts.push({ id: config?.id || chip?.id || "", error: err.message });
+    }
+  }
+
+  return result;
 }
 
 function mergeChipParams(params) {
@@ -744,29 +999,61 @@ function collectPackVariants(block) {
     .filter(Boolean);
 }
 
+function findPackMainMemory(block) {
+  const memories = [...String(block || "").matchAll(/<memory\b[^>]*>/gi)]
+    .map((match) => parseXmlAttributes(match[0]))
+    .filter((memory) => memory.start && memory.size);
+  const score = (memory) => {
+    const id = String(memory.id || "").toLowerCase();
+    let value = 0;
+    if (/^irom/.test(id)) value += 100;
+    if (memory.startup === "1") value += 50;
+    if (memory.default === "1") value += 30;
+    if (/^0x0?800/i.test(memory.start)) value += 20;
+    if (/^iram/.test(id) || /^0x200/i.test(memory.start)) value -= 100;
+    return value;
+  };
+  const memory = memories.sort((a, b) => score(b) - score(a))[0];
+  return memory ? {
+    id: memory.id || "",
+    start: memory.start || "",
+    size: memory.size || "",
+    startup: memory.startup || "",
+    default: memory.default || ""
+  } : null;
+}
+
 function collectPackDevices(pdscText) {
   if (!pdscText) return [];
   const seen = new Set();
   const devices = [];
-  for (const match of pdscText.matchAll(/<device\b[^>]*>[\s\S]*?<\/device>/gi)) {
-    const block = match[0];
-    const attrs = parseXmlAttributes(block.match(/<device\b[^>]*>/i)?.[0] || "");
-    const algorithm = findPackAlgorithmInBlock(block);
+  const familyBlocks = [...pdscText.matchAll(/<family\b[^>]*>[\s\S]*?<\/family>/gi)];
+  const blocks = familyBlocks.length ? familyBlocks.map((match) => match[0]) : [pdscText];
+  for (const familyBlock of blocks) {
+    const familyAttrs = parseXmlAttributes(familyBlock.match(/<family\b[^>]*>/i)?.[0] || "");
+    const familyAlgorithm = findPackAlgorithmInBlock(familyBlock);
+    for (const match of familyBlock.matchAll(/<device\b[^>]*>[\s\S]*?<\/device>/gi)) {
+      const block = match[0];
+      const attrs = parseXmlAttributes(block.match(/<device\b[^>]*>/i)?.[0] || "");
+      const algorithm = findPackAlgorithmInBlock(block) || familyAlgorithm;
+      const parent = familyAttrs.Dfamily || "";
     if (!attrs.Dname || !algorithm?.name) continue;
-    const addDevice = (name, parent = "") => {
-      if (!name || seen.has(name)) return;
-      seen.add(name);
-      devices.push({
-        name,
-        parent,
-        algorithm: algorithm.name,
-        start: algorithm.start || "",
-        size: algorithm.size || "",
-        default: algorithm.default || ""
-      });
-    };
-    addDevice(attrs.Dname);
-    for (const variant of collectPackVariants(block)) addDevice(variant, attrs.Dname);
+      const addDevice = (name, parent = "") => {
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        devices.push({
+          name,
+          parent,
+          algorithm: algorithm.name,
+          start: algorithm.start || "",
+          size: algorithm.size || "",
+          default: algorithm.default || "",
+          memory: findPackMainMemory(block)
+        });
+      };
+      addDevice(attrs.Dname, parent);
+      for (const variant of collectPackVariants(block)) addDevice(variant, attrs.Dname);
+    }
   }
   return devices.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -774,14 +1061,19 @@ function collectPackDevices(pdscText) {
 function findMatchingPackAlgorithm(pdscText, target) {
   const normalizedTarget = normalizePackName(target);
   if (!pdscText || !normalizedTarget) return null;
-  const deviceBlocks = [...pdscText.matchAll(/<device\b[^>]*>[\s\S]*?<\/device>/gi)];
-  for (const match of deviceBlocks) {
-    const block = match[0];
-    const attrs = parseXmlAttributes(block.match(/<device\b[^>]*>/i)?.[0] || "");
-    const names = [attrs.Dname, ...collectPackVariants(block), attrs.Dvendor].map(normalizePackName);
-    if (names.some((name) => name && (normalizedTarget.startsWith(name) || name.startsWith(normalizedTarget)))) {
-      const algorithm = findPackAlgorithmInBlock(block);
-      if (algorithm) return algorithm;
+  const familyBlocks = [...pdscText.matchAll(/<family\b[^>]*>[\s\S]*?<\/family>/gi)];
+  const blocks = familyBlocks.length ? familyBlocks.map((match) => match[0]) : [pdscText];
+  for (const familyBlock of blocks) {
+    const familyAttrs = parseXmlAttributes(familyBlock.match(/<family\b[^>]*>/i)?.[0] || "");
+    const familyAlgorithm = findPackAlgorithmInBlock(familyBlock);
+    for (const match of familyBlock.matchAll(/<device\b[^>]*>[\s\S]*?<\/device>/gi)) {
+      const block = match[0];
+      const attrs = parseXmlAttributes(block.match(/<device\b[^>]*>/i)?.[0] || "");
+      const names = [attrs.Dname, ...collectPackVariants(block), attrs.Dvendor, familyAttrs.Dfamily].map(normalizePackName);
+      if (names.some((name) => name && (normalizedTarget.startsWith(name) || name.startsWith(normalizedTarget)))) {
+        const algorithm = findPackAlgorithmInBlock(block) || familyAlgorithm;
+        if (algorithm) return algorithm;
+      }
     }
   }
 
@@ -1083,6 +1375,13 @@ function applyFlmParams(params, flmFile) {
     algoBlob: { filename: flm.filename || flmFile.filename, data: flm.algoBlob },
     flm
   };
+}
+
+function resolveStoredAlgorithmBlob(params) {
+  const ref = params.algorithmRef || params.algorithm?.ref || "";
+  if (!ref) return null;
+  const blob = loadChipAlgorithmBlob(ref);
+  return { filename: blob.filename, data: blob.data };
 }
 
 function replaceProfileToken(profile, key, value) {
@@ -2195,11 +2494,22 @@ async function parseMultipart(req) {
 
 function serveStatic(req, res) {
   const urlPath = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
+  if (urlPath.startsWith("/api/")) return send(res, 404, "Not found");
   const relative = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
   const filePath = path.normalize(path.join(PUBLIC_DIR, relative));
   if (!filePath.startsWith(PUBLIC_DIR)) return send(res, 403, "Forbidden");
   fs.readFile(filePath, (err, data) => {
-    if (err) return send(res, 404, "Not found");
+    if (err) {
+      if (!path.extname(urlPath)) {
+        const indexPath = path.join(PUBLIC_DIR, "index.html");
+        return fs.readFile(indexPath, (indexErr, indexData) => {
+          if (indexErr) return send(res, 404, "Not found");
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(indexData);
+        });
+      }
+      return send(res, 404, "Not found");
+    }
     const ext = path.extname(filePath);
     const type = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" }[ext] || "application/octet-stream";
     res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
@@ -2235,6 +2545,204 @@ async function readText(req) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function smtpConfig() {
+  const host = String(process.env.SMTP_HOST || "smtp.qq.com").trim();
+  const port = Number(process.env.SMTP_PORT || 465);
+  const user = String(process.env.SMTP_USER || "").trim();
+  const pass = String(process.env.SMTP_PASS || process.env.SMTP_PASSWORD || "").trim();
+  const from = String(process.env.SMTP_FROM || user).trim();
+  const to = String(process.env.FEEDBACK_TO || "1791286695@qq.com").trim();
+  const secure = String(process.env.SMTP_SECURE || (port === 465 ? "1" : "0")) !== "0";
+  return { host, port, user, pass, from, to, secure };
+}
+
+function encodeMailHeader(value) {
+  const text = String(value || "");
+  return /^[\x00-\x7f]*$/.test(text)
+    ? text
+    : `=?UTF-8?B?${Buffer.from(text, "utf8").toString("base64")}?=`;
+}
+
+function encodeMimeFilename(filename) {
+  const text = String(filename || "attachment").replace(/[\r\n"]/g, "_");
+  return /^[\x20-\x7e]*$/.test(text)
+    ? `filename="${text}"`
+    : `filename*=UTF-8''${encodeURIComponent(text)}`;
+}
+
+function contentTypeFromFilename(filename) {
+  const ext = path.extname(String(filename || "")).toLowerCase();
+  const types = {
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".json": "application/json",
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".zip": "application/zip",
+    ".rar": "application/vnd.rar",
+    ".7z": "application/x-7z-compressed",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".webp": "image/webp"
+  };
+  return types[ext] || "application/octet-stream";
+}
+
+function foldBase64(buffer) {
+  return Buffer.from(buffer || []).toString("base64").replace(/.{1,76}/g, "$&\r\n").trimEnd();
+}
+
+function dotStuff(message) {
+  return String(message || "").replace(/\r?\n/g, "\r\n").replace(/(^|\r\n)\./g, "$1..");
+}
+
+function normalizeMailAddress(value) {
+  const text = String(value || "").trim();
+  if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(text)) throw new Error("Invalid email address");
+  return text;
+}
+
+function smtpRead(socket) {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    const onData = (chunk) => {
+      buffer += chunk.toString("utf8");
+      const lines = buffer.split(/\r?\n/).filter(Boolean);
+      const last = lines[lines.length - 1] || "";
+      if (/^\d{3} /.test(last)) {
+        cleanup();
+        resolve(buffer);
+      }
+    };
+    const onError = (err) => {
+      cleanup();
+      reject(err);
+    };
+    const cleanup = () => {
+      socket.off("data", onData);
+      socket.off("error", onError);
+    };
+    socket.on("data", onData);
+    socket.on("error", onError);
+  });
+}
+
+async function smtpCommand(socket, command, expected) {
+  if (command) socket.write(`${command}\r\n`);
+  const response = await smtpRead(socket);
+  const code = Number(response.slice(0, 3));
+  const ok = Array.isArray(expected) ? expected.includes(code) : code === expected;
+  if (!ok) throw new Error(`SMTP ${command || "connect"} failed: ${response.trim()}`);
+  return response;
+}
+
+function connectSmtp(config) {
+  return new Promise((resolve, reject) => {
+    const socket = config.secure
+      ? tls.connect(config.port, config.host, { servername: config.host }, () => resolve(socket))
+      : net.connect(config.port, config.host, () => resolve(socket));
+    socket.setTimeout(15000, () => {
+      socket.destroy(new Error("SMTP connection timeout"));
+    });
+    socket.once("error", reject);
+  });
+}
+
+function buildMailMessage({ from, to, subject, body, attachments = [] }) {
+  const baseHeaders = [
+    `From: ${encodeMailHeader("PortVortex Feedback")} <${from}>`,
+    `To: <${to}>`,
+    `Subject: ${encodeMailHeader(subject)}`,
+    "MIME-Version: 1.0"
+  ];
+  if (!attachments.length) {
+    return [
+      ...baseHeaders,
+      "Content-Type: text/plain; charset=UTF-8",
+      "Content-Transfer-Encoding: 8bit",
+      "",
+      dotStuff(body),
+      "."
+    ].join("\r\n");
+  }
+  const boundary = `portvortex-${crypto.randomBytes(12).toString("hex")}`;
+  const parts = [
+    ...baseHeaders,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: 8bit",
+    "",
+    dotStuff(body)
+  ];
+  for (const file of attachments) {
+    const filename = file.filename || "attachment";
+    const dispositionName = encodeMimeFilename(filename);
+    parts.push(
+      `--${boundary}`,
+      `Content-Type: ${contentTypeFromFilename(filename)}`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; ${dispositionName}`,
+      "",
+      foldBase64(file.data)
+    );
+  }
+  parts.push(`--${boundary}--`, ".");
+  return parts.join("\r\n");
+}
+
+async function sendSmtpMail({ subject, body, attachments = [] }) {
+  const config = smtpConfig();
+  if (!config.user || !config.pass || !config.from) {
+    throw new Error("SMTP is not configured. Set SMTP_USER, SMTP_PASS, and optionally SMTP_HOST/SMTP_PORT/SMTP_FROM.");
+  }
+  const from = normalizeMailAddress(config.from);
+  const to = normalizeMailAddress(config.to);
+  const socket = await connectSmtp(config);
+  try {
+    await smtpCommand(socket, "", 220);
+    await smtpCommand(socket, `EHLO ${process.env.SMTP_HELO || "localhost"}`, 250);
+    await smtpCommand(socket, "AUTH LOGIN", 334);
+    await smtpCommand(socket, Buffer.from(config.user).toString("base64"), 334);
+    await smtpCommand(socket, Buffer.from(config.pass).toString("base64"), 235);
+    await smtpCommand(socket, `MAIL FROM:<${from}>`, 250);
+    await smtpCommand(socket, `RCPT TO:<${to}>`, [250, 251]);
+    await smtpCommand(socket, "DATA", 354);
+    const message = buildMailMessage({ from, to, subject, body, attachments });
+    await smtpCommand(socket, message, 250);
+    socket.write("QUIT\r\n");
+  } finally {
+    socket.end();
+  }
+}
+
+async function submitFeedbackMail(input, attachments = []) {
+  const title = String(input.title || "").trim();
+  const content = String(input.content || "").trim();
+  if (!title && !content) throw new Error("title or content is required");
+  const type = String(input.type || "other").trim();
+  const contact = String(input.contact || "").trim();
+  const subject = `[PortVortex][${type}] ${title || "Feedback"}`;
+  const body = [
+    `Type: ${type}`,
+    `Contact: ${contact || "-"}`,
+    `Time: ${new Date().toISOString()}`,
+    "",
+    content
+  ].join("\n");
+  await sendSmtpMail({ subject, body, attachments });
+  return { to: smtpConfig().to };
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://localhost");
@@ -2246,12 +2754,59 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/chip-configs/import") {
       const body = await readJson(req);
-      const config = saveChipConfig(body);
-      return send(res, 200, JSON.stringify({
-        ok: true,
-        config: buildClientChipConfig(config),
-        meta: getMetaSnapshot()
-      }), "application/json");
+      try {
+        const config = saveChipConfig(body, { overwrite: body.overwrite === true || body.overwrite === "1" });
+        return send(res, 200, JSON.stringify({
+          ok: true,
+          config: buildClientChipConfig(config),
+          meta: getMetaSnapshot()
+        }), "application/json");
+      } catch (err) {
+        if (err.code === "DUPLICATE_CHIP_CONFIG") {
+          return send(res, 409, JSON.stringify({ error: err.message, id: err.id }), "application/json");
+        }
+        throw err;
+      }
+    }
+    if (req.method === "POST" && url.pathname === "/api/chip-configs/import-pack") {
+      const { fields, files } = await parseMultipart(req);
+      const packFile = files.packFile || files.flmFile || files.algoFlm;
+      if (!packFile) return send(res, 400, JSON.stringify({ error: "PACK file is required" }), "application/json");
+      if (!/\.pack$/i.test(packFile.filename || "") && !isZipContainer(packFile.data)) {
+        return send(res, 400, JSON.stringify({ error: "Only CMSIS PACK files are supported for chip library import" }), "application/json");
+      }
+      const result = importChipConfigsFromPackFile(packFile, {
+        algoLoadAddr: fields.algoLoadAddr,
+        overwrite: fields.overwrite === "1" || fields.overwrite === "true"
+      });
+      return send(res, 200, JSON.stringify({ ok: true, ...result, meta: getMetaSnapshot() }), "application/json");
+    }
+    if (req.method === "GET" && url.pathname === "/api/chip-configs/export") {
+      const bundle = exportChipConfigBundle();
+      const body = JSON.stringify(bundle, null, 2);
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="portvortex-chip-configs-${new Date().toISOString().slice(0, 10)}.json"`
+      });
+      return res.end(body);
+    }
+    if (req.method === "POST" && url.pathname === "/api/chip-configs/import-bundle") {
+      const contentType = req.headers["content-type"] || "";
+      let bundle;
+      let overwrite = false;
+      if (/multipart\/form-data/i.test(contentType)) {
+        const { fields, files } = await parseMultipart(req);
+        const file = files.bundleFile || files.file;
+        const text = file ? file.data.toString("utf8") : fields.bundle || fields.text || "{}";
+        bundle = JSON.parse(text);
+        overwrite = fields.overwrite === "1" || fields.overwrite === "true";
+      } else {
+        const body = await readJson(req);
+        bundle = body.bundle || body;
+        overwrite = body.overwrite === true || body.overwrite === "1";
+      }
+      const result = importChipConfigBundle(bundle, { overwrite });
+      return send(res, 200, JSON.stringify({ ok: true, ...result, meta: getMetaSnapshot() }), "application/json");
     }
     if (req.method === "POST" && url.pathname === "/api/device-auth/import") {
       const body = await readJson(req);
@@ -2268,6 +2823,22 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/offline/settings") {
       const body = await readJson(req);
       const result = await applyOfflineSettings(body);
+      return send(res, 200, JSON.stringify({ ok: true, ...result }), "application/json");
+    }
+    if (req.method === "POST" && url.pathname === "/api/feedback") {
+      const contentType = req.headers["content-type"] || "";
+      let body;
+      let attachments = [];
+      if (/multipart\/form-data/i.test(contentType)) {
+        const parsed = await parseMultipart(req);
+        body = parsed.fields;
+        attachments = Object.entries(parsed.files)
+          .filter(([name]) => name.startsWith("attachment"))
+          .map(([, file]) => file);
+      } else {
+        body = await readJson(req);
+      }
+      const result = await submitFeedbackMail(body, attachments);
       return send(res, 200, JSON.stringify({ ok: true, ...result }), "application/json");
     }
     if (req.method === "GET" && url.pathname === "/api/adc") {
@@ -2341,10 +2912,12 @@ const server = http.createServer(async (req, res) => {
           const mergedParams = mergeChipParams(fields);
           const flmFile = files.flmFile || files.packFile || files.algoFlm;
           const flmApplied = applyFlmParams(mergedParams, flmFile);
-          const algoBlob = flmApplied.algoBlob || files.algoBlob;
+          const algoBlob = flmApplied.algoBlob || files.algoBlob || resolveStoredAlgorithmBlob(flmApplied.params);
           if (flmApplied.flm) {
             const packInfo = flmApplied.flm.pack ? ` from PACK ${flmApplied.flm.pack.selectedFlm}` : "";
             addLog(job, `Parsed FLM ${flmApplied.flm.filename || flmFile.filename}${packInfo}: ${flmApplied.flm.imageSize} bytes`);
+          } else if (algoBlob && flmApplied.params.algorithmRef) {
+            addLog(job, `Loaded stored chip algorithm ${flmApplied.params.algorithmRef}: ${algoBlob.data.length} bytes`);
           }
           runFlashJob(job, flmApplied.params, firmware, algoBlob).catch((err) => completeJob(job, "error", err.message));
         } catch (err) {

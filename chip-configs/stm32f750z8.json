@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "stm32f750z8",
+  "label": "STM32F750Z8",
+  "aliases": [],
+  "description": "Imported from PACK Keil.STM32F7xx_DFP.3.1.1.pack.",
+  "defaults": {
+    "target": "stm32f750z8",
+    "baseAddr": "0x08000000",
+    "flashBase": "0x08000000",
+    "eraseSize": "0x00008000",
+    "erase": "sector",
+    "attach": "",
+    "chunkSize": 2048,
+    "chunkDelay": 0,
+    "ackTimeout": 300,
+    "window": 3
+  },
+  "swd": {
+    "algo": "cmsis_flm",
+    "baseAddr": "0x08000000",
+    "flashBase": "0x08000000",
+    "eraseSize": "0x00008000",
+    "algoLoadAddr": "0x20000000",
+    "algoInitPc": "0x20000011",
+    "algoErasePc": "0x200000a1",
+    "algoFullErasePc": "0x20000061",
+    "algoProgramPc": "0x2000011f",
+    "algoUninitPc": "0x2000004d",
+    "algoDoneAddr": "0x20001668",
+    "algoDoneMagic": "",
+    "algoStack": "0x20001a70",
+    "algoBufferAddr": "0x20001268",
+    "algoBufferSize": "1024",
+    "algoTimeoutMs": "",
+    "algoInitTimeoutMs": "",
+    "algoEraseTimeoutMs": "6000",
+    "algoProgramTimeoutMs": "1000",
+    "algoInitR0": "0x08000000",
+    "algoInitR1": "168000000",
+    "algoInitR2": "",
+    "algorithmRef": "33144fcfb2ed42b9f04adc67a282f53ebd6e56463fa10ccd118b2dfe86bfa0bf.bin",
+    "algorithmSha256": "33144fcfb2ed42b9f04adc67a282f53ebd6e56463fa10ccd118b2dfe86bfa0bf"
+  },
+  "uart": {},
+  "rs485": {},
+  "pack": {
+    "sourceFile": "Keil.STM32F7xx_DFP.3.1.1.pack",
+    "selectedFlm": "CMSIS/Flash/STM32F75x_64_AXI.FLM",
+    "device": "STM32F750Z8",
+    "parent": "STM32F7 Series",
+    "algorithm": "CMSIS/Flash/STM32F75x_64_AXI.FLM",
+    "start": "0x08000000",
+    "size": "0x00010000"
+  },
+  "algorithm": {
+    "ref": "33144fcfb2ed42b9f04adc67a282f53ebd6e56463fa10ccd118b2dfe86bfa0bf.bin",
+    "sha256": "33144fcfb2ed42b9f04adc67a282f53ebd6e56463fa10ccd118b2dfe86bfa0bf",
+    "size": 4712,
+    "kind": "cmsis_flm"
+  }
+}

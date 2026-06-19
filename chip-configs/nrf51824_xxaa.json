@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "nrf51824_xxaa",
+  "label": "nRF51824_xxAA",
+  "aliases": [],
+  "description": "Imported from PACK nordicsemiconductor.nrf_devicefamilypacknordiclicense.8.63.1.pack.",
+  "defaults": {
+    "target": "nrf51824_xxaa",
+    "baseAddr": "0x00000000",
+    "flashBase": "0x00000000",
+    "flashSize": "0x00040000",
+    "eraseSize": "0x00000400",
+    "erase": "sector",
+    "attach": "",
+    "chunkSize": 2048,
+    "chunkDelay": 0,
+    "ackTimeout": 300,
+    "window": 3
+  },
+  "swd": {
+    "algo": "cmsis_flm",
+    "baseAddr": "0x00000000",
+    "flashBase": "0x00000000",
+    "eraseSize": "0x00000400",
+    "algoLoadAddr": "0x20000000",
+    "algoInitPc": "0x20000001",
+    "algoErasePc": "0x200000ad",
+    "algoFullErasePc": "0x2000008d",
+    "algoProgramPc": "0x20000129",
+    "algoUninitPc": "0x2000003d",
+    "algoDoneAddr": "0x20001c50",
+    "algoDoneMagic": "",
+    "algoStack": "0x20002058",
+    "algoBufferAddr": "0x20001850",
+    "algoBufferSize": "1024",
+    "algoTimeoutMs": "",
+    "algoInitTimeoutMs": "",
+    "algoEraseTimeoutMs": "3000",
+    "algoProgramTimeoutMs": "1000",
+    "algoInitR0": "0x00000000",
+    "algoInitR1": "168000000",
+    "algoInitR2": "",
+    "algorithmRef": "eabe384a78c761e9fa6540048f6b4523e38ae994b2f7fc51db5e52a67fd20f97.bin",
+    "algorithmSha256": "eabe384a78c761e9fa6540048f6b4523e38ae994b2f7fc51db5e52a67fd20f97"
+  },
+  "uart": {},
+  "rs485": {},
+  "pack": {
+    "sourceFile": "nordicsemiconductor.nrf_devicefamilypacknordiclicense.8.63.1.pack",
+    "selectedFlm": "Flash/nrf51xxx.flm",
+    "device": "nRF51824_xxAA",
+    "parent": "nRF51 Series",
+    "algorithm": "Flash/nrf51xxx.flm",
+    "start": "0x00000000",
+    "size": "0x00200000",
+    "memory": {
+      "id": "IROM1",
+      "start": "0x00000000",
+      "size": "0x00040000",
+      "startup": "true",
+      "default": "1"
+    },
+    "flmFlashBase": "0x00000000",
+    "flmFlashSize": "0x00200000"
+  },
+  "algorithm": {
+    "ref": "eabe384a78c761e9fa6540048f6b4523e38ae994b2f7fc51db5e52a67fd20f97.bin",
+    "sha256": "eabe384a78c761e9fa6540048f6b4523e38ae994b2f7fc51db5e52a67fd20f97",
+    "size": 6224,
+    "kind": "cmsis_flm"
+  }
+}

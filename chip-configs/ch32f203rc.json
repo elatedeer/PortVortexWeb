@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "ch32f203rc",
+  "label": "CH32F203RC",
+  "aliases": [],
+  "description": "Imported from PACK Keil.WCH32F2xx_DFP.1.0.3.pack.",
+  "defaults": {
+    "target": "ch32f203rc",
+    "baseAddr": "0x08000000",
+    "flashBase": "0x08000000",
+    "eraseSize": "0x00001000",
+    "erase": "sector",
+    "attach": "",
+    "chunkSize": 2048,
+    "chunkDelay": 0,
+    "ackTimeout": 300,
+    "window": 3
+  },
+  "swd": {
+    "algo": "cmsis_flm",
+    "baseAddr": "0x08000000",
+    "flashBase": "0x08000000",
+    "eraseSize": "0x00001000",
+    "algoLoadAddr": "0x20000000",
+    "algoInitPc": "0x20000001",
+    "algoErasePc": "0x20000093",
+    "algoFullErasePc": "0x20000057",
+    "algoProgramPc": "0x200000d3",
+    "algoUninitPc": "0x20000045",
+    "algoDoneAddr": "0x20002220",
+    "algoDoneMagic": "",
+    "algoStack": "0x20002628",
+    "algoBufferAddr": "0x20001220",
+    "algoBufferSize": "4096",
+    "algoTimeoutMs": "",
+    "algoInitTimeoutMs": "",
+    "algoEraseTimeoutMs": "10000",
+    "algoProgramTimeoutMs": "5000",
+    "algoInitR0": "0x08000000",
+    "algoInitR1": "168000000",
+    "algoInitR2": "",
+    "algorithmRef": "ef065f9bcd2cb41cd3c3c2732858303573a4f9d16668f9570c51c0a9feb0e9ef.bin",
+    "algorithmSha256": "ef065f9bcd2cb41cd3c3c2732858303573a4f9d16668f9570c51c0a9feb0e9ef"
+  },
+  "uart": {},
+  "rs485": {},
+  "pack": {
+    "sourceFile": "Keil.WCH32F2xx_DFP.1.0.3.pack",
+    "selectedFlm": "Flash/CH32F2xx.FLM",
+    "device": "CH32F203RC",
+    "parent": "CH32F2 Series",
+    "algorithm": "Flash/CH32F2xx.FLM",
+    "start": "0x08000000",
+    "size": "0x78000"
+  },
+  "algorithm": {
+    "ref": "ef065f9bcd2cb41cd3c3c2732858303573a4f9d16668f9570c51c0a9feb0e9ef.bin",
+    "sha256": "ef065f9bcd2cb41cd3c3c2732858303573a4f9d16668f9570c51c0a9feb0e9ef",
+    "size": 4636,
+    "kind": "cmsis_flm"
+  }
+}

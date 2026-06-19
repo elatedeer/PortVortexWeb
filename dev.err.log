@@ -1,0 +1,7 @@
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+[2m19:39:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/chip-configs/import-pack[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m20:32:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/chat/e121667a-df57-4045-94b4-32d68436c662/events[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)

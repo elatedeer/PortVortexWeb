@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "stm32h523retx",
+  "label": "STM32H523RETx",
+  "aliases": [],
+  "description": "Imported from PACK Keil.STM32H5xx_DFP.2.2.0.pack.",
+  "defaults": {
+    "target": "stm32h523retx",
+    "baseAddr": "0x08000000",
+    "flashBase": "0x08000000",
+    "eraseSize": "0x00002000",
+    "erase": "sector",
+    "attach": "",
+    "chunkSize": 2048,
+    "chunkDelay": 0,
+    "ackTimeout": 300,
+    "window": 3
+  },
+  "swd": {
+    "algo": "cmsis_flm",
+    "baseAddr": "0x08000000",
+    "flashBase": "0x08000000",
+    "eraseSize": "0x00002000",
+    "algoLoadAddr": "0x20000000",
+    "algoInitPc": "0x20000001",
+    "algoErasePc": "0x200001c1",
+    "algoFullErasePc": "0x2000016d",
+    "algoProgramPc": "0x20000275",
+    "algoUninitPc": "0x20000131",
+    "algoDoneAddr": "0x200017b8",
+    "algoDoneMagic": "",
+    "algoStack": "0x20001bc0",
+    "algoBufferAddr": "0x200013b8",
+    "algoBufferSize": "1024",
+    "algoTimeoutMs": "",
+    "algoInitTimeoutMs": "",
+    "algoEraseTimeoutMs": "400",
+    "algoProgramTimeoutMs": "400",
+    "algoInitR0": "0x08000000",
+    "algoInitR1": "168000000",
+    "algoInitR2": "",
+    "algorithmRef": "d73e251907db06ebae2281221709aae8a9d3dba41b12e75ecc27792c193607ca.bin",
+    "algorithmSha256": "d73e251907db06ebae2281221709aae8a9d3dba41b12e75ecc27792c193607ca"
+  },
+  "uart": {},
+  "rs485": {},
+  "pack": {
+    "sourceFile": "Keil.STM32H5xx_DFP.2.2.0.pack",
+    "selectedFlm": "CMSIS/Flash/STM32H5xx_512K_0800.FLM",
+    "device": "STM32H523RETx",
+    "parent": "STM32H5 Series",
+    "algorithm": "CMSIS/Flash/STM32H5xx_512K_0800.FLM",
+    "start": "0x08000000",
+    "size": "0x0080000"
+  },
+  "algorithm": {
+    "ref": "d73e251907db06ebae2281221709aae8a9d3dba41b12e75ecc27792c193607ca.bin",
+    "sha256": "d73e251907db06ebae2281221709aae8a9d3dba41b12e75ecc27792c193607ca",
+    "size": 5048,
+    "kind": "cmsis_flm"
+  }
+}
