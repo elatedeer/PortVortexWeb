@@ -471,7 +471,7 @@
         </template>
 
         <template v-else-if="currentPage === 'aiAssistant'">
-          <section class="space-y-5">
+          <section class="ai-page space-y-5">
             <el-card class="control-card" shadow="never">
               <template #header>
                 <div class="flex items-center justify-between gap-3">
@@ -479,17 +479,120 @@
                     <div class="text-base font-semibold">{{ t.aiAssistant }}</div>
                     <div class="text-xs text-slate-500">{{ t.aiAssistantHint }}</div>
                   </div>
-                  <el-tag type="info" effect="light">{{ t.comingSoon }}</el-tag>
+                  <el-tag :type="aiConfig.connected ? 'success' : 'info'" effect="light">
+                    {{ aiConfig.connected ? t.connected : t.disconnected }}
+                  </el-tag>
                 </div>
               </template>
-              <div class="ai-placeholder">
-                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                  <el-icon size="22"><ChatDotRound /></el-icon>
+              <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <div class="grid gap-4 md:grid-cols-2">
+                  <div class="field-block">
+                    <div class="field-label">{{ t.aiProvider }}</div>
+                    <el-select v-model="aiConfig.provider" @change="applyAiProviderPreset">
+                      <el-option v-for="provider in aiProviderOptions" :key="provider.value" :label="provider.label" :value="provider.value" />
+                    </el-select>
+                  </div>
+                  <div class="field-block">
+                    <div class="field-label">{{ t.aiModel }}</div>
+                    <el-select v-model="aiConfig.modelPreset" @change="applyAiModelPreset">
+                      <el-option v-for="model in aiModelOptions" :key="model.value" :label="model.label" :value="model.value" />
+                    </el-select>
+                  </div>
+                  <div class="field-block md:col-span-2">
+                    <div class="field-label">{{ t.aiApiUrl }}</div>
+                    <el-input v-model="aiConfig.apiUrl" :placeholder="t.aiApiUrlPlaceholder" />
+                  </div>
+                  <div class="field-block">
+                    <div class="field-label">{{ t.aiModelName }}</div>
+                    <el-input v-model="aiConfig.model" :placeholder="t.aiModelNamePlaceholder" />
+                  </div>
+                  <div class="field-block">
+                    <div class="field-label">{{ t.aiApiKey }}</div>
+                    <el-input v-model="aiConfig.apiKey" type="password" :placeholder="t.aiApiKeyPlaceholder" />
+                  </div>
+                  <div class="field-block md:col-span-2">
+                    <div class="field-label">{{ t.aiPromptTemplate }}</div>
+                    <el-select v-model="aiConfig.promptPreset" @change="applyAiPromptPreset">
+                      <el-option v-for="preset in aiPromptPresets" :key="preset.value" :label="preset.label" :value="preset.value" />
+                    </el-select>
+                  </div>
+                  <div class="field-block md:col-span-2">
+                    <div class="field-label">{{ t.aiDefaultPrompt }}</div>
+                    <el-input v-model="aiConfig.defaultPrompt" type="textarea" :rows="5" />
+                  </div>
+                  <div class="field-block md:col-span-2">
+                    <div class="field-label">{{ t.aiContextMode }}</div>
+                    <div class="chat-check-row">
+                      <label class="chat-check">
+                        <el-checkbox v-model="aiConfig.includeSerial" />
+                        <span>{{ t.generalChat }}</span>
+                      </label>
+                      <label class="chat-check">
+                        <el-checkbox v-model="aiConfig.includeRs485" />
+                        <span>{{ t.rs485Chat }}</span>
+                      </label>
+                      <label class="chat-check">
+                        <el-checkbox v-model="aiConfig.directChatOnly" />
+                        <span>{{ t.aiDirectChatOnly }}</span>
+                      </label>
+                    </div>
+                    <div class="mt-2 text-xs text-muted-foreground">{{ t.aiContextHint }}</div>
+                  </div>
+                  <div class="field-block">
+                    <div class="field-label">{{ t.aiContextMessageLimit }}</div>
+                    <el-input-number v-model="aiConfig.contextMessageLimit" :min="0" :max="80" class="w-full" />
+                  </div>
+                  <div class="field-block">
+                    <div class="field-label">{{ t.aiContextCharLimit }}</div>
+                    <el-input-number v-model="aiConfig.contextCharLimit" :min="0" :max="20000" :step="500" class="w-full" />
+                  </div>
+                  <div class="field-block">
+                    <div class="field-label">{{ t.aiTimeoutSeconds }}</div>
+                    <el-input-number v-model="aiConfig.timeoutSeconds" :min="10" :max="300" :step="10" class="w-full" />
+                  </div>
+                  <div class="md:col-span-2 flex flex-wrap gap-3">
+                    <el-button type="primary" :loading="aiConnecting" @click="connectAiAssistant">{{ t.connect }}</el-button>
+                    <el-button :disabled="aiLoading" @click="saveAiConfig()">{{ t.save }}</el-button>
+                    <el-button :disabled="aiLoading" @click="clearAiMessages">{{ t.clearContent }}</el-button>
+                  </div>
                 </div>
-                <div class="min-w-0">
-                  <div class="text-sm font-semibold">{{ t.aiAssistantEmptyTitle }}</div>
-                  <div class="mt-1 text-sm text-muted-foreground">{{ t.aiAssistantEmptyHint }}</div>
+                <div class="rounded-lg border border-border bg-muted p-3 text-xs text-muted-foreground">
+                  {{ t.aiStorageHint }}
                 </div>
+              </div>
+            </el-card>
+
+            <el-card class="control-card" shadow="never">
+              <template #header>
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-base font-semibold">{{ t.aiConversation }}</span>
+                  <el-tag type="info" effect="light">{{ aiContextSummary }}</el-tag>
+                </div>
+              </template>
+              <div class="chat-view ai-chat-view">
+                <template v-if="aiMessages.length">
+                  <div
+                    v-for="item in aiMessages"
+                    :key="item.id"
+                    :class="['chat-row', item.role === 'user' ? 'out' : item.role === 'assistant' ? 'in' : 'status']"
+                  >
+                    <div class="chat-line">
+                      <span class="chat-time">{{ item.at }}</span>
+                      <span class="chat-text">{{ item.content }}</span>
+                    </div>
+                  </div>
+                </template>
+                <div v-else class="text-sm text-muted-foreground">{{ t.aiAssistantEmptyHint }}</div>
+              </div>
+              <div class="message-input-row mt-4">
+                <el-input
+                  v-model="aiInput"
+                  class="message-input"
+                  :placeholder="t.aiMessagePlaceholder"
+                  @keydown.enter="sendAiMessage"
+                />
+                <el-button :disabled="aiLoading" @click="clearAiMessages">{{ t.clearContent }}</el-button>
+                <el-button type="primary" :loading="aiLoading" :disabled="!aiConfig.connected" @click="sendAiMessage">{{ t.send }}</el-button>
               </div>
             </el-card>
           </section>
@@ -999,12 +1102,18 @@ const modbusStatusText = ref("");
 const serialForwardDialogVisible = ref(false);
 const meta = reactive({ firmwareVersion: "v1.0.0", onlineEngineerCount: 1, deviceOnline: false });
 const toasts = ref([]);
+const aiConnecting = ref(false);
+const aiLoading = ref(false);
+const aiInput = ref("");
+const aiMessages = ref([]);
 let chatMessageSeq = 0;
 let toastSeq = 0;
+let aiMessageSeq = 0;
 let timedWorker = null;
 let timedWakeLock = null;
 const timedInFlight = new Set();
 const CHAT_QUICK_PHRASES_STORAGE_PREFIX = "portvortex.chat.quickPhrases.";
+const AI_CONFIG_STORAGE_KEY = "portvortex.aiAssistant.config";
 const TARGET_HISTORY_STORAGE_KEY = "portvortex.flash.targetHistory";
 const LAST_TARGET_STORAGE_KEY = "portvortex.flash.lastTarget";
 const feedbackForm = reactive({ title: "", type: "bug", contact: "", content: "" });
@@ -1028,6 +1137,22 @@ const serialPorts = [
   { key: "uart1", label: "UART1", kind: "serial" },
   { key: "rs485", label: "RS485", kind: "serial" }
 ];
+const aiConfig = reactive({
+  provider: "openai",
+  apiUrl: "https://api.openai.com/v1/chat/completions",
+  apiKey: "",
+  modelPreset: "gpt-4o-mini",
+  model: "gpt-4o-mini",
+  promptPreset: "device-diagnosis",
+  defaultPrompt: "",
+  includeSerial: true,
+  includeRs485: true,
+  directChatOnly: false,
+  contextMessageLimit: 10,
+  contextCharLimit: 3000,
+  timeoutSeconds: 120,
+  connected: false
+});
 const {
   deviceTokenHistory,
   saveDeviceTokenHistory,
@@ -1462,6 +1587,33 @@ Object.assign(copy.zh, {
   aiAssistantHint: "设备诊断、协议说明和升级辅助入口。",
   aiAssistantEmptyTitle: "AI助手暂未启用",
   aiAssistantEmptyHint: "后续可在这里接入设备问答、日志分析和固件升级建议。",
+  aiProvider: "大模型服务",
+  aiModel: "模型预设",
+  aiModelName: "模型名",
+  aiModelNamePlaceholder: "例如 gpt-4o-mini、deepseek-chat、moonshot-v1-8k",
+  aiApiUrl: "API URL",
+  aiApiUrlPlaceholder: "输入 chat completions 或 messages 接口地址",
+  aiApiKey: "API 密钥",
+  aiApiKeyPlaceholder: "仅保存到当前浏览器本地",
+  aiPromptTemplate: "默认提示词模板",
+  aiDefaultPrompt: "默认提示词",
+  aiContextMode: "上下文来源",
+  aiDirectChatOnly: "直接对话",
+  aiContextHint: "直接对话开启后，不会附带串口1或RS485收发记录；上下文会按条数和字符数截断。",
+  aiContextMessageLimit: "最多记录条数",
+  aiContextCharLimit: "最多上下文字符",
+  aiTimeoutSeconds: "请求超时(秒)",
+  aiStorageHint: "配置只保存在当前浏览器 localStorage，不写入后端；同一服务器的其他访问者不会读取到这份配置。",
+  aiConversation: "AI对话",
+  aiMessagePlaceholder: "输入诊断问题、协议问题或升级辅助问题",
+  aiConnectedSaved: "AI连接成功，配置已保存",
+  aiConfigSaved: "AI配置已保存",
+  aiNeedConfig: "请填写 API URL、API 密钥和模型名",
+  aiNeedConnect: "请先连接AI服务",
+  aiContextNone: "不附带串口上下文",
+  aiContextSerial: "附带串口1",
+  aiContextRs485: "附带RS485",
+  aiContextBoth: "附带串口1/RS485",
   comingSoon: "即将开放"
 });
 
@@ -1470,6 +1622,33 @@ Object.assign(copy.en, {
   aiAssistantHint: "Entry for device diagnosis, protocol help, and upgrade assistance.",
   aiAssistantEmptyTitle: "AI Assistant is not enabled yet",
   aiAssistantEmptyHint: "Device Q&A, log analysis, and firmware upgrade suggestions can be added here later.",
+  aiProvider: "Model Provider",
+  aiModel: "Model Preset",
+  aiModelName: "Model Name",
+  aiModelNamePlaceholder: "e.g. gpt-4o-mini, deepseek-chat, moonshot-v1-8k",
+  aiApiUrl: "API URL",
+  aiApiUrlPlaceholder: "Enter a chat completions or messages endpoint",
+  aiApiKey: "API Key",
+  aiApiKeyPlaceholder: "Stored only in this browser",
+  aiPromptTemplate: "Default Prompt Template",
+  aiDefaultPrompt: "Default Prompt",
+  aiContextMode: "Context Source",
+  aiDirectChatOnly: "Direct chat only",
+  aiContextHint: "When direct chat is enabled, Serial 1 and RS485 history is not attached. Context is capped by message count and characters.",
+  aiContextMessageLimit: "Max Context Records",
+  aiContextCharLimit: "Max Context Characters",
+  aiTimeoutSeconds: "Request Timeout (s)",
+  aiStorageHint: "Configuration is stored only in this browser localStorage and is not written to the backend. Other visitors to the same server cannot read it.",
+  aiConversation: "AI Conversation",
+  aiMessagePlaceholder: "Ask about diagnosis, protocol details, or upgrade assistance",
+  aiConnectedSaved: "AI connected and configuration saved",
+  aiConfigSaved: "AI configuration saved",
+  aiNeedConfig: "Enter API URL, API key, and model name",
+  aiNeedConnect: "Connect the AI service first",
+  aiContextNone: "No serial context",
+  aiContextSerial: "Serial 1 context",
+  aiContextRs485: "RS485 context",
+  aiContextBoth: "Serial 1/RS485 context",
   comingSoon: "Coming soon"
 });
 
@@ -1546,6 +1725,34 @@ const downloadModes = computed(() => [
   { label: lang.value === "zh" ? "串口" : "Serial", value: "uart" },
   { label: "485", value: "rs485" }
 ]);
+const aiProviderOptions = computed(() => [
+  { label: "OpenAI", value: "openai" },
+  { label: "Claude", value: "claude" },
+  { label: "Kimi", value: "kimi" },
+  { label: "Mimo", value: "mimo" },
+  { label: "DeepSeek", value: "deepseek" },
+  { label: lang.value === "zh" ? "OpenAI兼容" : "OpenAI compatible", value: "compatible" }
+]);
+const aiModelOptions = computed(() => [
+  { label: "GPT-4o mini", value: "gpt-4o-mini" },
+  { label: "Claude 3.5 Sonnet", value: "claude-3-5-sonnet-latest" },
+  { label: "Kimi", value: "moonshot-v1-8k" },
+  { label: "Mimo", value: "mimo-vl-7b-rl" },
+  { label: "DeepSeek Chat", value: "deepseek-chat" },
+  { label: lang.value === "zh" ? "自定义" : "Custom", value: "custom" }
+]);
+const aiPromptPresets = computed(() => [
+  { label: lang.value === "zh" ? "设备诊断" : "Device Diagnosis", value: "device-diagnosis" },
+  { label: lang.value === "zh" ? "协议说明" : "Protocol Help", value: "protocol-help" },
+  { label: lang.value === "zh" ? "升级辅助" : "Upgrade Assistance", value: "upgrade-assistance" },
+  { label: lang.value === "zh" ? "直接对话" : "Direct Chat", value: "direct-chat" },
+  { label: lang.value === "zh" ? "自定义" : "Custom", value: "custom" }
+]);
+const aiContextSummary = computed(() => {
+  if (aiConfig.directChatOnly || (!aiConfig.includeSerial && !aiConfig.includeRs485)) return t.value.aiContextNone;
+  if (aiConfig.includeSerial && aiConfig.includeRs485) return t.value.aiContextBoth;
+  return aiConfig.includeSerial ? t.value.aiContextSerial : t.value.aiContextRs485;
+});
 
 const customFields = [
   ["algoLoadAddr", "Load Addr"], ["algoInitPc", "Init PC"], ["algoErasePc", "Erase PC"],
@@ -1664,6 +1871,7 @@ onMounted(async () => {
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", handleTimedVisibilityChange);
   }
+  loadAiConfig();
   applyDeviceToken(getDeviceTokenFromPath(), "route");
   try {
     const response = await fetch("/api/meta");
@@ -1711,6 +1919,235 @@ function saveQuickPhrases(key, phrases) {
   if (typeof window === "undefined") return;
   const cleaned = [...new Set((phrases || []).map((item) => String(item || "").trim()).filter(Boolean))];
   window.localStorage.setItem(`${CHAT_QUICK_PHRASES_STORAGE_PREFIX}${key}`, JSON.stringify(cleaned));
+}
+
+function aiProviderDefault(provider) {
+  const defaults = {
+    openai: { apiUrl: "https://api.openai.com/v1/chat/completions", model: "gpt-4o-mini" },
+    claude: { apiUrl: "https://api.anthropic.com/v1/messages", model: "claude-3-5-sonnet-latest" },
+    kimi: { apiUrl: "https://api.moonshot.cn/v1/chat/completions", model: "moonshot-v1-8k" },
+    deepseek: { apiUrl: "https://api.deepseek.com/chat/completions", model: "deepseek-chat" },
+    mimo: { apiUrl: "", model: "mimo-vl-7b-rl" },
+    compatible: { apiUrl: "", model: "" }
+  };
+  return defaults[provider] || defaults.compatible;
+}
+
+function defaultAiPrompt(preset = aiConfig.promptPreset) {
+  const zh = lang.value === "zh";
+  const prompts = {
+    "device-diagnosis": zh
+      ? "你是嵌入式设备诊断助手。请根据用户问题和可选的串口/RS485收发记录，判断故障现象、可能原因、验证步骤和下一步建议。不要编造不存在的设备状态；如果证据不足，请明确说明需要补充哪些日志或操作。"
+      : "You are an embedded device diagnosis assistant. Use the user question and optional Serial/RS485 history to identify symptoms, likely causes, checks, and next actions. Do not invent device state; ask for missing logs or steps when evidence is insufficient.",
+    "protocol-help": zh
+      ? "你是串口、RS485和嵌入式通信协议说明助手。请解释帧结构、字段含义、时序、校验和排查方法。回答应面向工程调试，必要时给出示例帧，但不要自动生成会写入设备的危险指令。"
+      : "You are a Serial, RS485, and embedded protocol assistant. Explain frame structure, fields, timing, checksums, and debugging methods. Keep answers practical for engineering debug and avoid generating risky device-write commands unless explicitly requested.",
+    "upgrade-assistance": zh
+      ? "你是固件升级辅助助手。请结合用户问题和可选通信记录，判断升级前检查项、风险、回滚建议和验证步骤。不要假设已经完成升级；对可能导致设备不可用的操作给出明确提醒。"
+      : "You are a firmware upgrade assistant. Use the user question and optional communication history to suggest pre-checks, risks, rollback guidance, and verification steps. Do not assume an upgrade has completed; flag operations that may make the device unavailable.",
+    "direct-chat": zh
+      ? "你是简洁可靠的技术助手。直接回答用户问题；未提供足够信息时先说明缺口。"
+      : "You are a concise and reliable technical assistant. Answer directly and state what is missing when information is insufficient."
+  };
+  return prompts[preset] || prompts["device-diagnosis"];
+}
+
+function applyAiProviderPreset() {
+  const defaults = aiProviderDefault(aiConfig.provider);
+  aiConfig.apiUrl = defaults.apiUrl;
+  if (defaults.model) {
+    aiConfig.model = defaults.model;
+    aiConfig.modelPreset = defaults.model;
+  }
+  aiConfig.connected = false;
+}
+
+function applyAiModelPreset() {
+  if (aiConfig.modelPreset === "custom") return;
+  aiConfig.model = aiConfig.modelPreset;
+  aiConfig.connected = false;
+}
+
+function applyAiPromptPreset() {
+  if (aiConfig.promptPreset === "custom") return;
+  aiConfig.defaultPrompt = defaultAiPrompt(aiConfig.promptPreset);
+}
+
+function loadAiConfig() {
+  if (typeof window === "undefined") {
+    aiConfig.defaultPrompt = defaultAiPrompt();
+    return;
+  }
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(AI_CONFIG_STORAGE_KEY) || "{}");
+    Object.assign(aiConfig, {
+      ...parsed,
+      connected: false,
+      defaultPrompt: parsed.defaultPrompt || defaultAiPrompt(parsed.promptPreset || aiConfig.promptPreset)
+    });
+  } catch (_) {
+    aiConfig.defaultPrompt = defaultAiPrompt();
+  }
+}
+
+function saveAiConfig(silent = false) {
+  if (typeof window !== "undefined") {
+    const {
+      provider,
+      apiUrl,
+      apiKey,
+      modelPreset,
+      model,
+      promptPreset,
+      defaultPrompt,
+      includeSerial,
+      includeRs485,
+      directChatOnly,
+      contextMessageLimit,
+      contextCharLimit,
+      timeoutSeconds
+    } = aiConfig;
+    window.localStorage.setItem(AI_CONFIG_STORAGE_KEY, JSON.stringify({
+      provider,
+      apiUrl,
+      apiKey,
+      modelPreset,
+      model,
+      promptPreset,
+      defaultPrompt,
+      includeSerial,
+      includeRs485,
+      directChatOnly,
+      contextMessageLimit,
+      contextCharLimit,
+      timeoutSeconds
+    }));
+  }
+  if (!silent) showToast(t.value.aiConfigSaved, "success");
+}
+
+function normalizeAiEndpoint(url, provider) {
+  const text = String(url || "").trim().replace(/\/+$/, "");
+  if (!text) return "";
+  if (provider === "claude") return /\/messages$/i.test(text) ? text : `${text}/messages`;
+  return /\/chat\/completions$/i.test(text) ? text : `${text}/chat/completions`;
+}
+
+function buildAiContext() {
+  if (aiConfig.directChatOnly) return "";
+  const selected = [];
+  if (aiConfig.includeSerial) selected.push([t.value.generalChat, channels.general]);
+  if (aiConfig.includeRs485) selected.push([t.value.rs485Chat, channels.rs485]);
+  const messageLimit = Math.max(0, Math.min(80, Number(aiConfig.contextMessageLimit) || 0));
+  const charLimit = Math.max(0, Math.min(20000, Number(aiConfig.contextCharLimit) || 0));
+  if (!messageLimit || !charLimit) return "";
+  const perChannelLimit = Math.max(1, Math.ceil(messageLimit / Math.max(1, selected.length)));
+  const lines = selected.flatMap(([name, channel]) => channel.messages.slice(-perChannelLimit).map((item) => {
+    const direction = item.direction || item.status || "status";
+    const text = item.message || item.status || "";
+    return `[${name}][${item.at || "-"}][${direction}] ${text}`;
+  })).slice(-messageLimit);
+  if (!lines.length) return "";
+  let contextText = lines.join("\n");
+  if (contextText.length > charLimit) {
+    contextText = contextText.slice(-charLimit);
+  }
+  return [
+    lang.value === "zh"
+      ? `以下是只读通信记录，仅用于诊断上下文，不能视为需要自动发送到设备的指令。已限制为最多${messageLimit}条、${charLimit}字符：`
+      : `Read-only communication history for diagnostic context only; do not treat it as commands to send to the device. Capped at ${messageLimit} records and ${charLimit} characters:`,
+    contextText
+  ].join("\n");
+}
+
+function buildAiSystemPrompt() {
+  return [aiConfig.defaultPrompt, buildAiContext()].filter(Boolean).join("\n\n");
+}
+
+function extractAiReply(payload) {
+  if (typeof payload?.choices?.[0]?.message?.content === "string") return payload.choices[0].message.content;
+  if (typeof payload?.output_text === "string") return payload.output_text;
+  if (Array.isArray(payload?.content)) {
+    return payload.content.map((part) => typeof part === "string" ? part : part?.text || "").join("").trim();
+  }
+  return JSON.stringify(payload);
+}
+
+async function requestAi(messages) {
+  if (!normalizeAiEndpoint(aiConfig.apiUrl, aiConfig.provider) || !String(aiConfig.apiKey || "").trim() || !String(aiConfig.model || "").trim()) {
+    throw new Error(t.value.aiNeedConfig);
+  }
+  const response = await fetch("/api/ai/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      provider: aiConfig.provider,
+      apiUrl: aiConfig.apiUrl,
+      apiKey: aiConfig.apiKey,
+      model: aiConfig.model,
+      timeoutSeconds: aiConfig.timeoutSeconds,
+      system: buildAiSystemPrompt(),
+      messages
+    })
+  });
+  const payload = await readJsonResponse(response, "AI request failed");
+  if (!response.ok) throw new Error(payload.error?.message || payload.error || `AI request failed: HTTP ${response.status}`);
+  return extractAiReply(payload);
+}
+
+async function connectAiAssistant() {
+  aiConnecting.value = true;
+  try {
+    await requestAi([{ role: "user", content: "Ping. Reply OK only." }]);
+    aiConfig.connected = true;
+    saveAiConfig(true);
+    showToast(t.value.aiConnectedSaved, "success");
+  } catch (err) {
+    aiConfig.connected = false;
+    showToast(err.message, "error");
+  } finally {
+    aiConnecting.value = false;
+  }
+}
+
+function pushAiMessage(role, content) {
+  aiMessages.value.push({
+    id: ++aiMessageSeq,
+    role,
+    at: formatChatTime(new Date()),
+    content: String(content || "")
+  });
+}
+
+async function sendAiMessage() {
+  const message = String(aiInput.value || "").trim();
+  if (!message || aiLoading.value) return;
+  if (!aiConfig.connected) {
+    showToast(t.value.aiNeedConnect, "error");
+    return;
+  }
+  aiInput.value = "";
+  pushAiMessage("user", message);
+  aiLoading.value = true;
+  try {
+    const history = aiMessages.value
+      .filter((item) => item.role === "user" || item.role === "assistant")
+      .slice(-16)
+      .map((item) => ({ role: item.role, content: item.content }));
+    const reply = await requestAi(history);
+    aiConfig.connected = true;
+    pushAiMessage("assistant", reply);
+  } catch (err) {
+    aiConfig.connected = false;
+    pushAiMessage("status", err.message);
+    showToast(err.message, "error");
+  } finally {
+    aiLoading.value = false;
+  }
+}
+
+function clearAiMessages() {
+  aiMessages.value = [];
 }
 
 function loadTargetHistory() {
@@ -2475,6 +2912,9 @@ async function submitFlash() {
 }
 
 watch(chatDeviceToken, syncChatTopics);
+watch(() => [aiConfig.provider, aiConfig.apiUrl, aiConfig.apiKey, aiConfig.model], () => {
+  aiConfig.connected = false;
+});
 watch(() => flash.target, (target) => applyTargetConfig(target));
 watch(() => flash.flashMode, () => applyTargetConfig(flash.target));
 watch(() => flash.storeOnly, (enabled) => {

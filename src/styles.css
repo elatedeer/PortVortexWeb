@@ -246,6 +246,19 @@ select {
   padding: 7px 10px;
 }
 
+.ai-page .control-card .el-card__header {
+  padding: 14px 16px;
+}
+
+.ai-page .control-card .el-card__body {
+  padding: 16px;
+}
+
+.ai-chat-view {
+  min-height: 320px;
+  max-height: 520px;
+}
+
 .chat-check-row {
   display: flex;
   flex-wrap: wrap;

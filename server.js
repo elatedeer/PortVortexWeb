@@ -2545,6 +2545,117 @@ async function readText(req) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function normalizeAiProvider(value) {
+  const provider = String(value || "compatible").trim().toLowerCase();
+  return ["openai", "claude", "kimi", "mimo", "deepseek", "compatible"].includes(provider)
+    ? provider
+    : "compatible";
+}
+
+function normalizeAiEndpoint(value, provider) {
+  const url = String(value || "").trim().replace(/\/+$/, "");
+  if (!url) throw new Error("AI API URL is required");
+  const parsed = new URL(url);
+  if (!/^https?:$/.test(parsed.protocol)) throw new Error("AI API URL must start with http:// or https://");
+  if (provider === "claude") return /\/messages$/i.test(url) ? url : `${url}/messages`;
+  return /\/chat\/completions$/i.test(url) ? url : `${url}/chat/completions`;
+}
+
+function looksLikeHtmlResponse(text, contentType = "") {
+  const head = String(text || "").trim().slice(0, 200).toLowerCase();
+  return /text\/html/i.test(contentType) || head.startsWith("<!doctype html") || head.startsWith("<html");
+}
+
+function normalizeAiTimeoutMs(value) {
+  const seconds = Number(value || 120);
+  return Math.max(10, Math.min(300, Number.isFinite(seconds) ? seconds : 120)) * 1000;
+}
+
+function aiFetchErrorMessage(err) {
+  if (err?.name === "AbortError" || err?.name === "TimeoutError") {
+    return "AI request timed out. Increase the AI request timeout or reduce context size.";
+  }
+  const cause = err?.cause;
+  const causeCode = cause?.code || cause?.errno || "";
+  const causeMessage = cause?.message || "";
+  const detail = [causeCode, causeMessage].filter(Boolean).join(": ");
+  return detail
+    ? `AI request failed at network layer: ${detail}`
+    : `AI request failed at network layer: ${err?.message || "fetch failed"}`;
+}
+
+async function proxyAiChat(input = {}) {
+  const provider = normalizeAiProvider(input.provider);
+  const endpoint = normalizeAiEndpoint(input.apiUrl, provider);
+  const apiKey = String(input.apiKey || "").trim();
+  const model = String(input.model || "").trim();
+  if (!apiKey) throw new Error("AI API key is required");
+  if (!model) throw new Error("AI model is required");
+  const messages = Array.isArray(input.messages) ? input.messages : [];
+  const system = String(input.system || "");
+  const isClaude = provider === "claude";
+  const body = isClaude
+    ? {
+      model,
+      max_tokens: Number(input.maxTokens || 2048),
+      system,
+      messages: messages.map((item) => ({
+        role: item.role === "assistant" ? "assistant" : "user",
+        content: String(item.content || "")
+      }))
+    }
+    : {
+      model,
+      messages: [
+        ...(system ? [{ role: "system", content: system }] : []),
+        ...messages.map((item) => ({
+          role: item.role === "assistant" ? "assistant" : "user",
+          content: String(item.content || "")
+        }))
+      ]
+    };
+  const timeoutMs = normalizeAiTimeoutMs(input.timeoutSeconds);
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: isClaude
+        ? {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        }
+        : {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
+        },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (err) {
+    return { status: err?.name === "AbortError" || err?.name === "TimeoutError" ? 504 : 502, payload: { error: aiFetchErrorMessage(err) } };
+  }
+  const text = await response.text();
+  const contentType = response.headers.get("content-type") || "";
+  if (looksLikeHtmlResponse(text, contentType)) {
+    return {
+      status: 502,
+      payload: {
+        error: provider === "claude"
+          ? "AI API URL returned an HTML page. Enter the real Claude Messages API endpoint, for example https://api.anthropic.com/v1/messages."
+          : "AI API URL returned an HTML page. Enter the real chat completions endpoint, for example https://your-gateway.example.com/v1/chat/completions."
+      }
+    };
+  }
+  let payload;
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch (_) {
+    payload = { error: (text || `AI request failed: HTTP ${response.status}`).slice(0, 500) };
+  }
+  return { status: response.status, payload };
+}
+
 function smtpConfig() {
   const host = String(process.env.SMTP_HOST || "smtp.qq.com").trim();
   const port = Number(process.env.SMTP_PORT || 465);
@@ -2840,6 +2951,11 @@ const server = http.createServer(async (req, res) => {
       }
       const result = await submitFeedbackMail(body, attachments);
       return send(res, 200, JSON.stringify({ ok: true, ...result }), "application/json");
+    }
+    if (req.method === "POST" && url.pathname === "/api/ai/chat") {
+      const body = await readJson(req);
+      const result = await proxyAiChat(body);
+      return send(res, result.status, JSON.stringify(result.payload), "application/json");
     }
     if (req.method === "GET" && url.pathname === "/api/adc") {
       const params = Object.fromEntries(url.searchParams.entries());
